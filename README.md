@@ -1,0 +1,1 @@
+pip install git+https://gitlab.kaust.edu.sa/vannescm/sina.git
