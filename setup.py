@@ -10,8 +10,11 @@ setup(name = 'sina',
       packages = find_packages(),
       python_requires='>3.6',
       install_requires = [
-          #Generated with `pipreqs .` and then moved here from requirements.txt
-          'bidali'
+          'requests',
+          'pandas',
+          'bidali',
+          'pymongo',
+          'spacy'
       ],
       extras_require = {
           'documentation': ['Sphinx']
