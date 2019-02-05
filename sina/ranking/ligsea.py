@@ -22,6 +22,12 @@ class Ligsea(object):
         gene_column (str | int): column name or number containing the gene labels in
           `gene_table_file`.
         **kwargs: are passed through to the pandas `gene_table_file` loading function.
+
+    Example:
+        >>> from sina.ranking.ligsea import Ligsea
+        >>> lg = Ligsea('neuroblastoma', 'metasta', '/tmp/mock.csv', 'gene_col')
+        >>> lg.retrieve_associations()
+        >>> lg.determine_gene_associations()
     """
     def __init__(self, topic_query, assoc_regex, gene_table_file, gene_column, assoc_regex_flags=re.IGNORECASE, **kwargs):
         self.topic = topic_query
@@ -77,7 +83,7 @@ class Ligsea(object):
                     inbetween_feature_vectors = {}
                     for token in sent:
                         # First check if still before match
-                        if assoc_match.start() < token.idx:
+                        if (assoc_match.start() < token.idx - sent_startposition) and before_assoc_match:
                             before_assoc_match = False
                             #Store before_assoc_match featurevectors
                             for iv in inbetween_feature_vectors:
@@ -88,7 +94,7 @@ class Ligsea(object):
                                     inbetween_feature_vectors[iv]
                                 )
                             inbetween_feature_vector = {p:0 for p in pos_of_interest}
-                            inbetween_feature_vectors[gs]['sent'] = hash(sent)
+                            inbetween_feature_vector['sent'] = hash(sent)
                         gene_symbol = self.get_gene_symbol(token.text)
                         if before_assoc_match:
                             if gene_symbol:
@@ -131,6 +137,6 @@ class Ligsea(object):
             #Normalize alias names to lower case
             self.gene_dict.index = self.gene_dict.alias.str.lower()
         if token.lower() in self.gene_dict.index:
-            result = gd.loc[token.lower()].symbol
+            result = self.gene_dict.loc[token.lower()].symbol
             return (result,) if isinstance(result,str) else tuple(result)
         else: return None
