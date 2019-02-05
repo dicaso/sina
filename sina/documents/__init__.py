@@ -136,14 +136,14 @@ class PubmedCollection(BaseDocumentCollection):
             writer.commit()
         self.process_documents(commit_abstracts)
 
-    def query_document_index(self,query):
+    def query_document_index(self,query,sortbydate=True):
         import whoosh.index as index
         from whoosh.qparser import QueryParser
         indexdir = os.path.join(self.location,'.index')
         ix = index.open_dir(indexdir)
         with ix.searcher() as searcher:
             query = QueryParser("content", ix.schema).parse(query)
-            results = searcher.search(query)
+            results = [r.fields() for r in searcher.search(query, limit=None, sortedby='date' if sortbydate else False)]
         return results
                 
     def filter_documents(self,regex):
