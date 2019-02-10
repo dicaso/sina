@@ -21,6 +21,9 @@ class Ligsea(object):
           '.xlx', or '.xlsx', the two recognised file types.
         gene_column (str | int): column name or number containing the gene labels in
           `gene_table_file`.
+        rank_column (str | int): column name or number containing the gene rank values;
+          the values in this column should either be continuously ascending or descending
+          with the most significant values at the top of the table/file.
         **kwargs: are passed through to the pandas `gene_table_file` loading function.
 
     Example:
@@ -29,7 +32,7 @@ class Ligsea(object):
         >>> lg.retrieve_associations()
         >>> lg.determine_gene_associations()
     """
-    def __init__(self, topic_query, assoc_regex, gene_table_file, gene_column, assoc_regex_flags=re.IGNORECASE, **kwargs):
+    def __init__(self, topic_query, assoc_regex, gene_table_file, gene_column, rank_column='ranks', assoc_regex_flags=re.IGNORECASE, **kwargs):
         self.topic = topic_query
         self.assoc = (
             assoc_regex if isinstance(assoc_regex, re.Pattern) else
@@ -41,6 +44,7 @@ class Ligsea(object):
             self.genetable = pd.read_excel(gene_table_file,**kwargs)
         else: raise Exception('filetype "%s" not recognised' % gene_table_file.split('.')[-1])
         self.genecol = gene_column
+        self.rankcol = rank_column
 
     def retrieve_associations(self, corpus_class=PubmedCollection, corpus_location='~/pubmed'):
         """Retrieve associations within the specified `corpus_class`.
@@ -165,8 +169,8 @@ class Ligsea(object):
         from plumbum import colors
         print(colors.red | 'Type "?" to see the abstract, "!" to skip gene, "x" if good association, anything else if poor association.')
         print(len(self.gene_association),'to evaluate.')
-        for gene in self.gene_association:
-            print(colors.green | 'Reviewing gene "%s" (%s):' % (gene,', '.join(self.get_gene_aliases(gene))))
+        for geni,gene in enumerate(self.gene_association):
+            print(colors.green | 'Reviewing gene "%s" (%s)[%s]:' % (gene,', '.join(self.get_gene_aliases(gene)),geni))
             print(len(self.gene_association[gene]),'associated abstracts.')
             skipGene = False
             for assoc in self.gene_association[gene]:
@@ -209,12 +213,81 @@ class Ligsea(object):
             self.curated_gene_associations.ranks
         )
 
-    def calculate_enrichment(self,rel_alpha=.05):
+    def calculate_nulldistro(self, n, nulldistrosize):
+        """Calculate a nulldistribution from the genetable ranks
+
+        Args:
+            n (int): Number of elements to sum
+            nulldistrosize (int): Number of permutations
+
+        TODO allow for random seed, allow for other function than ranksum
+        """
+        random_permutation_results = []
+        rankvalues = self.genetable[self.rankcol].copy()
+        for i in range(nulldistrosize):
+            random_permutation_results.append(
+                rankvalues.sample(n).sum()
+            )
+        return pd.Series(random_permutation_results).sort_values()
+
+    def calculate_enrichment(self,rel_alpha=.05,ascending=None,nulldistrosize=1000):
         """Caclulate enrichment set for each time point
 
         Args:
             rel_alpha (float): relevance alpha, level at which set enrichment is
               calculated for least unknown to discover gene
+            ascending (bool): if given determines whether rank values are ascending
+              or descending with gene significance; if not provided the table is
+              interrogated wheter it contains ascending or descending values.
+            nulldistrosize (int): the number of permutations to calculate the 
+              nulldistributions.
         """
-        #Select only first mentions of gene associations
-        
+        # Select only first mentions of gene associations
+        assoc_data = self.curated_gene_associations[~self.curated_gene_associations.gene.duplicated()]
+        # Set rank type
+        ascending_ranks = (
+            self.genetable[self.rankcol].is_monotonic_increasing
+            if ascending is None else ascending
+        )
+        if not hasattr(self,'nulldistros'):
+            self.nulldistros = {}
+        date_relevancies = {}
+        for date in assoc_data.date.drop_duplicates():
+            stratum = assoc_data[assoc_data.date<=date]
+            previousTopPassed = False
+            for top in stratum.ranks.drop_duplicates():
+                stratum_top = stratum[(stratum.ranks<=top) if ascending_ranks else (stratum.ranks>=top)]
+                # Calculate null_distributions
+                stratum_top_size = len(stratum_top)
+                if stratum_top_size not in self.nulldistros:
+                    self.nulldistros[stratum_top_size] = self.calculate_nulldistro(self, stratum_top_size, nulldistrosize=nulldistrosize)
+                # Compare stratum top ranksum
+                ranksum = stratum_top.ranks.sum()
+                rankprob = (
+                    nulldistros[stratum_top_size]>=ranksum if ascending_ranks else
+                    nulldistros[stratum_top_size]<=ranksum
+                ).mean()
+                if rankprob <= rel_alpha:
+                    previousTopPassed = (stratum_top_size, ranksum, rankprob)
+                else: break # break if ranksum top of stratum does not meet relevancy cutoff
+            if previousTopPassed:
+                # Given that we have a relevant top, we now look for a next 'unknown' gene with combined ranksum value still under cutoff
+                stratum_top_size = previousTopPassed[0]
+                if stratum_top_size+1 not in self.nulldistros:
+                    self.nulldistros[stratum_top_size+1] = self.calculate_nulldistro(self, stratum_top_size+1, nulldistrosize=nulldistrosize)
+                lastTopGene = stratum.gene.iloc[stratum_top_size-1]
+                lastTopGene_i = self.genetable.index.get_loc(lastTopGene)
+                nextGene = self.genetable.index[lastTopGene_i+1]
+                for i,rankvalue in enumerate(self.genetable[self.rankcol].loc[nextGene:]):
+                    ranksum = previousTopPassed[1]+rankvalue
+                    rankprob = (
+                        nulldistros[stratum_top_size+1]>=ranksum if ascending_ranks else
+                        nulldistros[stratum_top_size+1]<=ranksum
+                    ).mean()
+                    if rankprob > rel_alpha: break
+                if i-1 < 0:
+                    date_relevancies[date] = lastTopGene # relevancy section contains the last top gene
+                else:
+                    date_relevancies[date] = self.genetable.index[lastTopGene_i+i]
+            else: date_relevancies[date] = None
+            
