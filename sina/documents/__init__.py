@@ -143,7 +143,8 @@ class PubmedCollection(BaseDocumentCollection):
         ix = index.open_dir(indexdir)
         with ix.searcher() as searcher:
             query = QueryParser("content", ix.schema).parse(query)
-            results = [r.fields() for r in searcher.search(query, limit=None, sortedby='date' if sortbydate else False)]
+            results = searcher.search(query, limit=None, sortedby='date' if sortbydate else False)
+            results = [r.fields() for r in results]
         return results
                 
     def filter_documents(self,regex):

@@ -95,7 +95,13 @@ class Ligsea(object):
                                 )
                             inbetween_feature_vector = {p:0 for p in pos_of_interest}
                             inbetween_feature_vector['sent'] = hash(sent)
-                        gene_symbol = self.get_gene_symbol(token.text)
+                        # Only looking up if gene symbol if it is not likely to be a general English word
+                        gene_symbol = (
+                            None if (token.text.isalpha() and (token.is_sent_start or token.text.islower()))
+                            else self.get_gene_symbol(token.text)
+                        )
+                        #if gene_symbol:
+                        #    import pdb; pdb.set_trace()
                         if before_assoc_match:
                             if gene_symbol:
                                 # For previous genes update GENE count (TODO retroactive for genes coming after)
@@ -111,12 +117,13 @@ class Ligsea(object):
                                     inbetween_feature_vectors[iv][token.pos_]+=1
                         else:
                             if gene_symbol:
-                                if not iv in self.gene_association: self.gene_association[iv] = {}
-                                if (association['pmid'],association['date']) not in self.gene_association[iv]:
-                                    self.gene_association[iv][(association['pmid'],association['date'])] = []
-                                self.gene_association[iv][(association['pmid'],association['date'])].append(
-                                    inbetween_feature_vector.copy()
-                                )
+                                for gs in gene_symbol:
+                                    if not gs in self.gene_association: self.gene_association[gs] = {}
+                                    if (association['pmid'],association['date']) not in self.gene_association[gs]:
+                                        self.gene_association[gs][(association['pmid'],association['date'])] = []
+                                    self.gene_association[gs][(association['pmid'],association['date'])].append(
+                                        inbetween_feature_vector.copy()
+                                    )
                                 self.gene_association_sents[hash(sent)] = sent
                                 inbetween_feature_vector['GENE']+=1
                             elif token.pos_ in pos_of_interest:
@@ -140,3 +147,74 @@ class Ligsea(object):
             result = self.gene_dict.loc[token.lower()].symbol
             return (result,) if isinstance(result,str) else tuple(result)
         else: return None
+
+    def get_gene_aliases(self,gene_symbol):
+        return list(self.gene_dict[self.gene_dict.symbol == gene_symbol].alias)
+
+    def evaluate_gene_associations(self,infer=False):
+        """Curate gene associations made by indicating
+        if they are relevant or not
+
+        Args:
+            infer (float): A simple machine learning model
+              predicts at each annotation made what the next
+              annotation will be (online learning), after reaching
+              the `infer` float threshold furhter evaluations do not
+              have to be provided anymore (TODO work in progress)
+        """
+        from plumbum import colors
+        print(colors.red | 'Type "?" to see the abstract, "!" to skip gene, "x" if good association, anything else if poor association.')
+        print(len(self.gene_association),'to evaluate.')
+        for gene in self.gene_association:
+            print(colors.green | 'Reviewing gene "%s" (%s):' % (gene,', '.join(self.get_gene_aliases(gene))))
+            print(len(self.gene_association[gene]),'associated abstracts.')
+            skipGene = False
+            for assoc in self.gene_association[gene]:
+                for sent_assoc in self.gene_association[gene][assoc]:
+                    if skipGene:
+                        sent_assoc['valid_annot'] = False
+                    else:
+                        print(self.gene_association_sents[sent_assoc['sent']])
+                        feedback = input()
+                        if feedback == '?':
+                            print('abstract') #TODO if ? show abstract
+                            feedback = input()
+                        elif feedback == '!': skipGene = True
+                        sent_assoc['valid_annot'] = feedback == 'x'
+        self.curated_gene_associations = [
+            (gene,assoc,sent_assoc)
+            for gene in self.gene_association
+            for assoc in self.gene_association[gene]
+            for sent_assoc in self.gene_association[gene][assoc]
+            if sent_assoc['valid_annot']
+        ]
+        # Sort according to oldest to newest date
+        self.curated_gene_associations.sort(key=lambda x: x[1][1])
+        self.curated_gene_associations = pd.DataFrame({
+            'gene':[c[0] for c in self.curated_gene_associations],
+            'date':[c[1][1] for c in self.curated_gene_associations],
+            'pmid':[c[1][0] for c in self.curated_gene_associations],
+            'sent':[c[2]['sent'] for c in self.curated_gene_associations],
+            'featurevec':[c[2] for c in self.curated_gene_associations]
+        })
+
+    def plot_ranked_gene_associations(self):
+        import matplotlib.pyplot as plt
+        self.curated_gene_associations['ranks'] = [
+            self.genetable.index.get_loc(g) for g in self.curated_gene_associations.gene
+        ]
+        fig,ax = plt.subplots()
+        ax.scatter(
+            self.curated_gene_associations.date,
+            self.curated_gene_associations.ranks
+        )
+
+    def calculate_enrichment(self,rel_alpha=.05):
+        """Caclulate enrichment set for each time point
+
+        Args:
+            rel_alpha (float): relevance alpha, level at which set enrichment is
+              calculated for least unknown to discover gene
+        """
+        #Select only first mentions of gene associations
+        
