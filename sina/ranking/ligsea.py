@@ -205,13 +205,14 @@ class Ligsea(object):
     def plot_ranked_gene_associations(self):
         import matplotlib.pyplot as plt
         self.curated_gene_associations['ranks'] = [
-            self.genetable.index.get_loc(g) for g in self.curated_gene_associations.gene
+            self.genetable[self.rankcol][g] for g in self.curated_gene_associations.gene
         ]
         fig,ax = plt.subplots()
         ax.scatter(
-            self.curated_gene_associations.date,
-            self.curated_gene_associations.ranks
+            self.curated_gene_associations.date.values,
+            self.curated_gene_associations.ranks.values
         )
+        ax.set_ylim((self.genetable[self.rankcol].min(),self.genetable[self.rankcol].max()))
 
     def calculate_nulldistro(self, n, nulldistrosize):
         """Calculate a nulldistribution from the genetable ranks
@@ -230,7 +231,7 @@ class Ligsea(object):
             )
         return pd.Series(random_permutation_results).sort_values()
 
-    def calculate_enrichment(self,rel_alpha=.05,ascending=None,nulldistrosize=1000):
+    def calculate_enrichment(self,rel_alpha=.05,ascending=None,nulldistrosize=1000,max_enrich=None):
         """Caclulate enrichment set for each time point
 
         Args:
@@ -241,6 +242,11 @@ class Ligsea(object):
               interrogated wheter it contains ascending or descending values.
             nulldistrosize (int): the number of permutations to calculate the 
               nulldistributions.
+            TODO max_enrich (int): given a maximum number of expected genes involved
+              in the process (e.g. by calculating with `predict_number_of_relevant_genes`)
+              an enrichment should not go below the least ranked gene by a number at which
+              the density of geneset genes and other genes becomes lower than that of the
+              originally found enriched set.
         """
         # Select only first mentions of gene associations
         assoc_data = self.curated_gene_associations[~self.curated_gene_associations.gene.duplicated()]
@@ -252,37 +258,44 @@ class Ligsea(object):
         if not hasattr(self,'nulldistros'):
             self.nulldistros = {}
         date_relevancies = {}
+        date_relevancies_known_gene = {}
         for date in assoc_data.date.drop_duplicates():
-            stratum = assoc_data[assoc_data.date<=date]
+            stratum = assoc_data[assoc_data.date<=date].copy()
+            #import pdb; pdb.set_trace()
+            # Sort stratum according to ranks
+            stratum.sort_values('ranks', ascending=ascending_ranks, inplace=True)
+            # Set flag if a relevancy segment has been found
             previousTopPassed = False
             for top in stratum.ranks.drop_duplicates():
                 stratum_top = stratum[(stratum.ranks<=top) if ascending_ranks else (stratum.ranks>=top)]
                 # Calculate null_distributions
                 stratum_top_size = len(stratum_top)
                 if stratum_top_size not in self.nulldistros:
-                    self.nulldistros[stratum_top_size] = self.calculate_nulldistro(self, stratum_top_size, nulldistrosize=nulldistrosize)
+                    self.nulldistros[stratum_top_size] = self.calculate_nulldistro(stratum_top_size, nulldistrosize=nulldistrosize)
                 # Compare stratum top ranksum
                 ranksum = stratum_top.ranks.sum()
                 rankprob = (
-                    nulldistros[stratum_top_size]>=ranksum if ascending_ranks else
-                    nulldistros[stratum_top_size]<=ranksum
+                    self.nulldistros[stratum_top_size]<=ranksum if ascending_ranks else
+                    self.nulldistros[stratum_top_size]>=ranksum
                 ).mean()
                 if rankprob <= rel_alpha:
                     previousTopPassed = (stratum_top_size, ranksum, rankprob)
                 else: break # break if ranksum top of stratum does not meet relevancy cutoff
             if previousTopPassed:
+                # Save relevant known gene
+                date_relevancies_known_gene[date] = stratum.gene[stratum.index[previousTopPassed[0]-1]]
                 # Given that we have a relevant top, we now look for a next 'unknown' gene with combined ranksum value still under cutoff
                 stratum_top_size = previousTopPassed[0]
                 if stratum_top_size+1 not in self.nulldistros:
-                    self.nulldistros[stratum_top_size+1] = self.calculate_nulldistro(self, stratum_top_size+1, nulldistrosize=nulldistrosize)
+                    self.nulldistros[stratum_top_size+1] = self.calculate_nulldistro(stratum_top_size+1, nulldistrosize=nulldistrosize)
                 lastTopGene = stratum.gene.iloc[stratum_top_size-1]
                 lastTopGene_i = self.genetable.index.get_loc(lastTopGene)
                 nextGene = self.genetable.index[lastTopGene_i+1]
                 for i,rankvalue in enumerate(self.genetable[self.rankcol].loc[nextGene:]):
                     ranksum = previousTopPassed[1]+rankvalue
                     rankprob = (
-                        nulldistros[stratum_top_size+1]>=ranksum if ascending_ranks else
-                        nulldistros[stratum_top_size+1]<=ranksum
+                        self.nulldistros[stratum_top_size+1]<=ranksum if ascending_ranks else
+                        self.nulldistros[stratum_top_size+1]>=ranksum
                     ).mean()
                     if rankprob > rel_alpha: break
                 if i-1 < 0:
@@ -290,4 +303,59 @@ class Ligsea(object):
                 else:
                     date_relevancies[date] = self.genetable.index[lastTopGene_i+i]
             else: date_relevancies[date] = None
-            
+        
+        self.date_relevancies = pd.DataFrame(list(date_relevancies.items()),columns=('date','gene'))
+        self.date_relevancies['ranks'] = self.date_relevancies.gene.apply(
+            lambda x: None if x is None else self.genetable[self.rankcol][x]
+        )
+        self.date_relevancies_known_gene = pd.DataFrame(list(date_relevancies_known_gene.items()),columns=('date','gene'))
+        self.date_relevancies_known_gene['ranks'] = self.date_relevancies_known_gene.gene.apply(
+            lambda x: None if x is None else self.genetable[self.rankcol][x]
+        )
+        
+    def predict_number_of_relevant_genes(self,plot=True,surges=1):
+        """Predict number of relevant genes
+        as they have been discovered through time.
+
+        Regression with generalised logistic function, info see
+        https://en.wikipedia.org/wiki/Generalised_logistic_function
+
+        Args:
+            plot (bool): If plotting is not necessary, it can be disabled.
+            surges (int): Number of periods of exponential-like discoveries
+        """
+        import numpy as np
+        from scipy.optimize import curve_fit
+        import matplotlib.pyplot as plt
+        assoc_data = self.curated_gene_associations[~self.curated_gene_associations.gene.duplicated()].copy()
+        assoc_data['event'] = range(1,len(assoc_data)+1)
+        assoc_data = assoc_data[['date','event']].drop_duplicates('date', keep='last')
+        if plot:
+            fig,ax = plt.subplots()
+            ax.scatter(assoc_data.date.values, assoc_data.event)
+        xdata = assoc_data.date.apply(lambda x: x.timestamp()).values
+        xdata_norm = (xdata - xdata.min())/xdata.max()
+        ydata = assoc_data.event.values
+        if surges == 1:
+            def sigmoid_func(t, A, K, C, Q, B, M, v):
+                return A + (K-A)/((C + Q*np.exp(-B*(t-M)))**(1/v))
+            p0 = [ydata.min(), ydata.max(), 1, 1, 1, .0001, 1]
+            bounds = (0,np.inf)
+        elif surges == 2:
+            def sigmoid_func(t, A1, K1, C1, Q1, B1, M1, v1, K2, C2, Q2, B2, M2, v2):
+                # M2 stands for the second surge switch time, in which another,
+                # linked logistic regression is calculated
+                t1_seg = A1 + (K1-A1)/((C1 + Q1*np.exp(-B1*(t[t<M2]-M1)))**(1/v1))
+                t2_seg = K1 + (K2-K1)/((C2 + Q2*np.exp(-B2*(t[t>=M2]-M2)))**(1/v2))
+                return np.append(t1_seg,t2_seg)
+            p0 = [
+                ydata.min(), ydata.max()/2, 1, 1, 1, .0001, 1,
+                ydata.max()/2, 1, 1, 1, .5, 1
+            ]
+            bounds = (0,np.inf)
+        popt, pcov = curve_fit(sigmoid_func, xdata_norm, ydata, p0=p0, bounds=bounds)
+        total_expected = popt[0]+popt[1] if surges==1 else popt[0]+popt[1]+popt[7] # A+K if surges==1 else A1+K1+K2
+        if plot:
+            ax.plot(assoc_data.date.values, sigmoid_func(xdata_norm, *popt), 'r-', label='fit')
+            ax.axhline(total_expected,c='r')
+        return total_expected
