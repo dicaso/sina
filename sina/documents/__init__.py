@@ -71,9 +71,11 @@ class PubmedCollection(BaseDocumentCollection):
         ftp.cwd('pubmed/baseline')
         filenames = ftp.nlst()
         for filename in filenames:
-            print('Retrieving',filename)
-            with open(os.path.join(self.location,filename),'wb') as fh:
-                ftp.retrbinary('RETR '+ filename, fh.write)
+            localfilename = os.path.join(self.location,filename)
+            if not os.path.exists(localfilename):
+                print('Retrieving',filename)
+                with open(localfilename,'wb') as fh:
+                    ftp.retrbinary('RETR '+ filename, fh.write)
         ftp.quit()
 
     def process_documents(self,callback,*args,verbose=False,progress=True,**kwargs):
@@ -136,14 +138,21 @@ class PubmedCollection(BaseDocumentCollection):
             writer.commit()
         self.process_documents(commit_abstracts)
 
-    def query_document_index(self,query,sortbydate=True):
+    def query_document_index(self,query,sortbydate=False):
+        """Query the corpus index
+
+        Args:
+            query (str): the elasticv-search like query str to run.
+            sortbydate (bool): If set to True, might encounter memory
+              issues with the current version of whoosh.
+        """
         import whoosh.index as index
         from whoosh.qparser import QueryParser
         indexdir = os.path.join(self.location,'.index')
         ix = index.open_dir(indexdir)
         with ix.searcher() as searcher:
             query = QueryParser("content", ix.schema).parse(query)
-            results = searcher.search(query, limit=None, sortedby='date' if sortbydate else False)
+            results = searcher.search(query, limit=None, scored=False, sortedby='date' if sortbydate else None)
             results = [r.fields() for r in results]
         return results
                 

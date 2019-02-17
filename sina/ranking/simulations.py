@@ -15,8 +15,9 @@ class GeneExperiment(object):
     a set of general meta-experiment related assumptions.
 
     Args:
-        geneset (str set): set of gene symbols that is considered relevant for
-          the experiment.
+        geneset (str set | int): set of gene symbols that is considered relevant for
+          the experiment. If an `int` is provided a random set of genes of that 
+          number is chosen.
         complexity (int): at a theoretical level, the complexity would stand for
           the amount of independent concepts/processes/factors that are at play
           in the experiment; at a practical level, it is here considered to be the
@@ -25,7 +26,10 @@ class GeneExperiment(object):
           if it could be accounted for in the analysis, it should have been eliminated
           as much as possible in the results that are being considered, and as such would
           no longer play a meaningful role. If set to 0, do not consider complexity in
-          the simulation.
+          the simulation. The size of each "PCA" component is chosen similar to the size
+          of the geneset under consideration. Theoretically you could make a more complicated
+          model, where the components have different possible sizes, but for now I do not
+          see a benefit of adding that to the model.
         noise (float): a float in the range [0 1[, with 0 meaning no added noise and 1 so
           much noise added that the result should be indistinguishable from a random sequence
         resolution (float): the resolution determines how rankable the `experimental` results
@@ -47,7 +51,7 @@ class GeneExperiment(object):
         
     """
     def __init__(
-            self,
+            self, geneset,
             complexity=1, noise=.9, resolution=1,
             complexrnk=1, relevantset=.9, completeset=.9
         ):
@@ -63,6 +67,19 @@ class GeneExperiment(object):
                 'completeset': completeset
             }
         }
+        if isinstance(geneset, int):
+            self.geneset = set(self.genelist.sample(geneset))
+        else: self.geneset = geneset
+
+    @property
+    def genelist(self):
+        cls = type(self)
+        if not hasattr(cls, 'genelist_'):
+            #TODO loading gene_dictionary is not efficient, should take
+            #from other source
+            from sina.nomenclatures.genenames import get_gene_dictionary
+            cls.genelist_ = get_gene_dictionary().symbol.drop_duplicates().reset_index().symbol
+        return cls.genelist_
 
 class GeneExperimentSeries(object):
     """In the GeneExperimentSeries class
