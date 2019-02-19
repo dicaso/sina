@@ -61,8 +61,8 @@ class PubmedCollection(BaseDocumentCollection):
     >>> pmc = PubmedCollection('pubmed','~/pubmed')
     >>> pmc.retrieve_documents()
     """
-    def retrieve_documents(self):
-        import ftplib
+    def retrieve_documents(self,check_md5=False):
+        import ftplib, hashlib
         ftp = ftplib.FTP(
             host='ftp.ncbi.nlm.nih.gov',
             user='anonymous',
@@ -72,7 +72,21 @@ class PubmedCollection(BaseDocumentCollection):
         filenames = ftp.nlst()
         for filename in filenames:
             localfilename = os.path.join(self.location,filename)
-            if not os.path.exists(localfilename):
+            # md5 logic
+            if check_md5 and localfilename.endswith('.xml.gz'):
+                try:
+                    md5 = open(localfilename+'.md5').read().strip().split()[1]
+                except FileNotFoundError: refetch = False
+                try:
+                    with open(localfilename,'rb') as file_to_check:
+                        md5_returned = hashlib.md5(file_to_check.read()).hexdigest()
+                        if md5 != md5_returned:
+                            refetch = True
+                        else: refetch = False
+                except FileNotFoundError:
+                    refetch = True
+            else: refetch = False
+            if refetch or not os.path.exists(localfilename):
                 print('Retrieving',filename)
                 with open(localfilename,'wb') as fh:
                     ftp.retrbinary('RETR '+ filename, fh.write)
@@ -85,10 +99,18 @@ class PubmedCollection(BaseDocumentCollection):
             callback (function): function that will take the title, abstract text, and full
               xml element as first positional arguments and any further provided arguments
         """
+        import hashlib
         xmlfilenames = glob.glob(os.path.join(self.location,'*.xml.gz'))
         totalxmlfiles = len(xmlfilenames)
+        article_pos = 0
         for xmli,xmlfilename in enumerate(xmlfilenames):
-            #TODO check md5
+            #check md5
+            md5 = open(xmlfilename+'.md5').read().strip().split()[1]
+            with open(xmlfilename,'rb') as file_to_check:
+                md5_returned = hashlib.md5(file_to_check.read()).hexdigest()
+                if md5 != md5_returned:
+                    print('Run the method `pmc.retrieve_documents(check_md5=True)` on the pubmed object')
+                    raise FileNotFoundError('Correct file was not downloaded',xmlfilename)
             with gzip.open(xmlfilename) as xmlfilehandler:
                 context = iter(ET.iterparse(xmlfilehandler, events=("start", "end")))
                 event, root = next(context)
@@ -99,9 +121,10 @@ class PubmedCollection(BaseDocumentCollection):
                         try:
                             title = elem.find('MedlineCitation/Article/ArticleTitle').text
                             abstract = elem.find('MedlineCitation/Article/Abstract/AbstractText').text
-                            callback(title,abstract,elem,*args,**kwargs)
+                            callback(title,abstract,elem,(xmli,article_pos),*args,**kwargs) #TODO save map xmli to filename
                         except AttributeError as e:
                             if verbose: print(e)
+                        article_pos += 1
                         #TODO output article
                         root.clear() # ensures only one article is kept in memory
                         # but because of the 'clear' you cannot use the root for info on
@@ -113,30 +136,34 @@ class PubmedCollection(BaseDocumentCollection):
         from whoosh.index import create_in
         from whoosh import fields
         schema = fields.Schema(
-            title=fields.TEXT(stored=True),
+            title=fields.TEXT(),
             pmid=fields.ID(stored=True),
-            content=fields.TEXT(stored=True),
-            date=fields.DATETIME(stored=True)
+            content=fields.TEXT(),
+            date=fields.DATETIME(stored=True),
+            filepos=fields.INT(),
+            articlepos=fields.INT()
         )
         indexdir = os.path.join(self.location,'.index')
         os.mkdir(indexdir)
         ix = create_in(indexdir, schema)
-        def commit_abstracts(title,abstract,elem):
+        writer = ix.writer()
+        def commit_abstracts(title,abstract,elem,position):
             import datetime
             date = datetime.datetime(
                 int(elem.find('MedlineCitation/DateCompleted/Year').text),
                 int(elem.find('MedlineCitation/DateCompleted/Month').text),
                 int(elem.find('MedlineCitation/DateCompleted/Day').text)
             )
-            writer = ix.writer()
+            #writer = ix.writer()
             writer.add_document(
                 title=title,
                 pmid=elem.find('MedlineCitation/PMID').text,
                 content=abstract,
                 date=date
             )
-            writer.commit()
+            #writer.commit()
         self.process_documents(commit_abstracts)
+        writer.commit()
 
     def query_document_index(self,query,sortbydate=False):
         """Query the corpus index
@@ -162,7 +189,7 @@ class PubmedCollection(BaseDocumentCollection):
         import re
         # if regex is provided as str compile as regex
         regex = regex if isinstance(regex, re.Pattern) else re.compile(regex,re.IGNORECASE)
-        def callback(title,abstract,elem,filteredList):
+        def callback(title,abstract,elem,position,filteredList):
             if bool(regex.search(title) if title else False) | bool(regex.search(abstract) if abstract else False):
                 filteredList.append(
                     {
