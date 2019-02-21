@@ -14,6 +14,7 @@ setup(name = 'sina',
           'pandas',
           'bidali',
           'pymongo',
+          'whoosh',
           'spacy'
       ],
       extras_require = {

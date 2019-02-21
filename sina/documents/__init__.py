@@ -131,22 +131,28 @@ class PubmedCollection(BaseDocumentCollection):
                         # current iterated PubmedArticle element
             if progress: print(end='\rProgress (%): {:<10}'.format(xmli/totalxmlfiles)*100)
 
-    def build_document_index(self):
-        """Build an index for fast document retrieval"""
+    def build_document_index(self, shards=10):
+        """Build an index for fast document retrieval
+
+        shards (int): The number of document partitionings to use. Whoosh has memory issues
+          for large indexes, this is a way around.
+        """
         from whoosh.index import create_in
         from whoosh import fields
         schema = fields.Schema(
-            title=fields.TEXT(),
+            title=fields.TEXT(stored=True),
             pmid=fields.ID(stored=True),
-            content=fields.TEXT(),
+            content=fields.TEXT(stored=True),
             date=fields.DATETIME(stored=True),
-            filepos=fields.INT(),
-            articlepos=fields.INT()
+            #filepos=fields.INT(),
+            #articlepos=fields.INT()
         )
         indexdir = os.path.join(self.location,'.index')
         os.mkdir(indexdir)
-        ix = create_in(indexdir, schema)
-        writer = ix.writer()
+        ix = []
+        for iix in range(shards):
+            os.mkdir(os.path.join(indexdir,iix))
+            ix.append(create_in(os.path.join(indexdir,iix), schema))
         def commit_abstracts(title,abstract,elem,position):
             import datetime
             date = datetime.datetime(
@@ -154,16 +160,15 @@ class PubmedCollection(BaseDocumentCollection):
                 int(elem.find('MedlineCitation/DateCompleted/Month').text),
                 int(elem.find('MedlineCitation/DateCompleted/Day').text)
             )
-            #writer = ix.writer()
+            writer = ix[position[0] % 10].writer() #make this position[0]*position[1] to redistribute
             writer.add_document(
                 title=title,
                 pmid=elem.find('MedlineCitation/PMID').text,
                 content=abstract,
                 date=date
             )
-            #writer.commit()
+            writer.commit()
         self.process_documents(commit_abstracts)
-        writer.commit()
 
     def query_document_index(self,query,sortbydate=False):
         """Query the corpus index
