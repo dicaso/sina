@@ -151,8 +151,8 @@ class PubmedCollection(BaseDocumentCollection):
         os.mkdir(indexdir)
         ix = []
         for iix in range(shards):
-            os.mkdir(os.path.join(indexdir,iix))
-            ix.append(create_in(os.path.join(indexdir,iix), schema))
+            os.mkdir(os.path.join(indexdir,str(iix)))
+            ix.append(create_in(os.path.join(indexdir,str(iix)), schema))
         def commit_abstracts(title,abstract,elem,position):
             import datetime
             date = datetime.datetime(
