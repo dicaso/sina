@@ -35,7 +35,7 @@ class Ligsea(object):
     def __init__(self, topic_query, assoc_regex, gene_table_file, gene_column, rank_column='ranks', assoc_regex_flags=re.IGNORECASE, **kwargs):
         self.topic = topic_query
         self.assoc = (
-            assoc_regex if isinstance(assoc_regex, re.Pattern) else
+            assoc_regex if not isinstance(assoc_regex, str) else
             re.compile(assoc_regex, assoc_regex_flags)
         )
         if gene_table_file.endswith('.csv'):
