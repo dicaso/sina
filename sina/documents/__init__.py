@@ -181,13 +181,13 @@ class PubmedCollection(BaseDocumentCollection):
         import whoosh.index as index
         from whoosh.qparser import QueryParser
         indexdirs = os.path.join(self.location,'.index','*')
+        query = QueryParser("content", ix.schema).parse(query)
         results = []
         print()
         for indexdir in glob.glob(indexdirs):
             print('\rProcessing shard', os.path.basename(indexdir),end='')
             ix = index.open_dir(indexdir)
             with ix.searcher() as searcher:
-                query = QueryParser("content", ix.schema).parse(query)
                 search_results = searcher.search(query, limit=None, scored=False, sortedby='date' if sortbydate else None)
                 results += [r.fields() for r in search_results]
         print(len(results),'retrieved')
