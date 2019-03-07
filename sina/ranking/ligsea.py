@@ -111,9 +111,10 @@ class Ligsea(object):
                             #Store before_assoc_match featurevectors
                             for iv in inbetween_feature_vectors:
                                 if not iv in self.gene_association: self.gene_association[iv] = {}
-                                if association_key not in self.gene_association[iv]:
-                                    self.gene_association[iv][association_key] = []
-                                self.gene_association[iv][association_key].append(
+                                prev_association_key = inbetween_feature_vectors[iv].pop('association_key')
+                                if prev_association_key not in self.gene_association[iv]:
+                                    self.gene_association[iv][prev_association_key] = []
+                                self.gene_association[iv][prev_association_key].append(
                                     inbetween_feature_vectors[iv]
                                 )
                             inbetween_feature_vector = {p:0 for p in pos_of_interest}
@@ -127,6 +128,7 @@ class Ligsea(object):
                                 for gs in gene_symbol:
                                     inbetween_feature_vectors[gs] = {p:0 for p in pos_of_interest}
                                     inbetween_feature_vectors[gs]['sent'] = hash(sent)
+                                    inbetween_feature_vectors[gs]['association_key'] = association_key
                                     self.gene_association_sents[hash(sent)] = sent
                             elif token.pos_ in pos_of_interest:
                                 for iv in inbetween_feature_vectors:
