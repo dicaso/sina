@@ -181,7 +181,13 @@ class Ligsea(object):
               have to be provided anymore (TODO work in progress)
         """
         from plumbum import colors
-        print(colors.red | 'Type "?" to see the abstract, "!" to skip gene, "x" if good association, anything else if poor association.')
+        print(
+            colors.red | (
+                'Type "?" to see the abstract, "!" to skip gene, '+
+                '"+" if positive association, "-" for negative association, '+
+                '"x" for unclear association, anything else if invalid association.'
+            )
+        )
         print(len(self.gene_association),'to evaluate.')
         for geni,gene in enumerate(self.gene_association):
             print(colors.green | 'Reviewing gene "%s" (%s)[%s]:' % (gene,', '.join(self.get_gene_aliases(gene)),geni))
@@ -205,7 +211,7 @@ class Ligsea(object):
                             print('abstract') #TODO if ? show abstract
                             feedback = input()
                         elif feedback == '!': skipGene = True
-                        sent_assoc['valid_annot'] = feedback == 'x'
+                        sent_assoc['valid_annot'] = feedback if feedback in ('+', '-', 'x') else False
         self.curated_gene_associations = [
             (gene,assoc,sent_assoc)
             for gene in self.gene_association
