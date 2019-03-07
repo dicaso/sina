@@ -170,7 +170,7 @@ class Ligsea(object):
     def get_gene_aliases(self,gene_symbol):
         return list(self.gene_dict[self.gene_dict.symbol == gene_symbol].alias)
 
-    def evaluate_gene_associations(self,infer=False,store=True):
+    def evaluate_gene_associations(self,infer=False,store=True,revaluate=False):
         """Curate gene associations made by indicating
         if they are relevant or not
 
