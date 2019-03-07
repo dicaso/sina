@@ -191,7 +191,7 @@ class PubmedCollection(BaseDocumentCollection):
             with ix.searcher() as searcher:
                 search_results = searcher.search(query, limit=None, scored=False, sortedby='date' if sortbydate else None)
                 results += [r.fields() for r in search_results]
-        print(len(results),'retrieved')
+        print('\n',len(results),'retrieved')
         return results
                 
     def filter_documents(self,regex):

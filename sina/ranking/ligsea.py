@@ -30,7 +30,8 @@ class Ligsea(object):
         >>> from sina.ranking.ligsea import Ligsea
         >>> lg = Ligsea('neuroblastoma', 'metasta', '/tmp/mock.csv', 'gene_col')
         >>> lg.retrieve_associations()
-        >>> lg.determine_gene_associations()
+        >>> lg.determine_gene_associations() #issue downloading genenames
+        >>> lg.evaluate_gene_associations()
     """
     def __init__(self, topic_query, assoc_regex, gene_table_file, gene_column, rank_column='ranks', assoc_regex_flags=re.IGNORECASE, **kwargs):
         self.topic = topic_query
@@ -72,7 +73,13 @@ class Ligsea(object):
         """
         import spacy
         if twosents: raise NotImplementedError
-        nlp = spacy.load('en')
+        try: nlp = spacy.load('en')
+        except OSError:
+            raise Exception(
+                '''spacy language module not installed.
+                Run: python -m spacy download en
+                '''
+            )
         self.gene_association = {}
         self.gene_association_sents = {}
         pos_of_interest = ('VERB', 'NOUN', 'ADP', 'PUNCT', 'GENE')
@@ -92,9 +99,9 @@ class Ligsea(object):
                             #Store before_assoc_match featurevectors
                             for iv in inbetween_feature_vectors:
                                 if not iv in self.gene_association: self.gene_association[iv] = {}
-                                if (association['pmid'],association['date']) not in self.gene_association[iv]:
-                                    self.gene_association[iv][(association['pmid'],association['date'])] = []
-                                self.gene_association[iv][(association['pmid'],association['date'])].append(
+                                if (association['pmid'],association['date'],token.text) not in self.gene_association[iv]:
+                                    self.gene_association[iv][(association['pmid'],association['date'],token.text)] = []
+                                self.gene_association[iv][(association['pmid'],association['date'],token.text)].append(
                                     inbetween_feature_vectors[iv]
                                 )
                             inbetween_feature_vector = {p:0 for p in pos_of_interest}
@@ -123,9 +130,9 @@ class Ligsea(object):
                             if gene_symbol:
                                 for gs in gene_symbol:
                                     if not gs in self.gene_association: self.gene_association[gs] = {}
-                                    if (association['pmid'],association['date']) not in self.gene_association[gs]:
-                                        self.gene_association[gs][(association['pmid'],association['date'])] = []
-                                    self.gene_association[gs][(association['pmid'],association['date'])].append(
+                                    if (association['pmid'],association['date'],token.text) not in self.gene_association[gs]:
+                                        self.gene_association[gs][(association['pmid'],association['date'],token.text)] = []
+                                    self.gene_association[gs][(association['pmid'],association['date'],token.text)].append(
                                         inbetween_feature_vector.copy()
                                     )
                                 self.gene_association_sents[hash(sent)] = sent
@@ -163,7 +170,7 @@ class Ligsea(object):
             infer (float): A simple machine learning model
               predicts at each annotation made what the next
               annotation will be (online learning), after reaching
-              the `infer` float threshold furhter evaluations do not
+              the `infer` float threshold further evaluations do not
               have to be provided anymore (TODO work in progress)
         """
         from plumbum import colors
