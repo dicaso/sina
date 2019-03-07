@@ -56,6 +56,7 @@ class Ligsea(object):
             corpus_location (str): Path to corpus directory.
         """
         corpus = corpus_class('pubmed',corpus_location)
+        self.corpus_location = corpus_location
         self.documents = corpus.query_document_index(self.topic)
         self.associations = [d for d in self.documents if self.assoc.search(d['content'])]
 
@@ -169,7 +170,7 @@ class Ligsea(object):
     def get_gene_aliases(self,gene_symbol):
         return list(self.gene_dict[self.gene_dict.symbol == gene_symbol].alias)
 
-    def evaluate_gene_associations(self,infer=False):
+    def evaluate_gene_associations(self,infer=False,store=True):
         """Curate gene associations made by indicating
         if they are relevant or not
 
@@ -179,41 +180,53 @@ class Ligsea(object):
               annotation will be (online learning), after reaching
               the `infer` float threshold further evaluations do not
               have to be provided anymore (TODO work in progress)
+            store (bool): Annotations are stored in corpus directory
+            revaluate (bool): Previous annotations are not retrieved
         """
         from plumbum import colors
+        import shelve, hashlib, os
         print(
             colors.red | (
-                'Type "?" to see the abstract, "!" to skip gene alias and "!!" to skip entire gene\n, '+
+                'Type "?" to see the abstract, "!" to skip gene alias and "!!" to skip entire gene,\n'+
                 '"+" if positive association, "-" for negative association, '+
                 '"x" for unclear association, anything else if invalid association.'
             )
         )
         print(len(self.gene_association),'to evaluate.')
-        for geni,gene in enumerate(self.gene_association):
-            print(colors.green | 'Reviewing gene "%s" (%s)[%s]:' % (gene,', '.join(self.get_gene_aliases(gene)),geni))
-            print(len(self.gene_association[gene]),'associated abstracts.')
-            skipGene = False
-            skipAliases = set()
-            for assoc in self.gene_association[gene]:
-                for sent_assoc in self.gene_association[gene][assoc]:
-                    if skipGene or assoc[2] in skipAliases:
-                        sent_assoc['valid_annot'] = False
-                    else:
-                        s = self.gene_association_sents[sent_assoc['sent']]
-                        print(
-                            s.text.replace(
-                                s.text[assoc[3][0]:assoc[3][1]],colors.red | s.text[assoc[3][0]:assoc[3][1]]
-                            ).replace(
-                                assoc[2], colors.green | assoc[2]
+        with shelve.open(os.path.join(os.path.expanduser(self.corpus_location),'.annotations.shelve')) as stored_annots:
+            for geni,gene in enumerate(self.gene_association):
+                print(colors.green | 'Reviewing gene "%s" (%s)[%s]:' % (gene,', '.join(self.get_gene_aliases(gene)),geni))
+                print(len(self.gene_association[gene]),'associated abstracts.')
+                skipGene = False
+                skipAliases = set()
+                for assoc in self.gene_association[gene]:
+                    for sent_assoc in self.gene_association[gene][assoc]:
+                        sent_store_key = str((
+                            hashlib.md5(self.gene_association_sents[sent_assoc['sent']].text.encode()).hexdigest(),
+                            assoc[2], assoc[3] # gene alias and regex match positions
+                        ))
+                        if not revaluate and sent_store_key in stored_annots:
+                            sent_assoc['valid_annot'] = stored_annots[sent_store_key]
+                            continue
+                        if skipGene or assoc[2] in skipAliases:
+                            sent_assoc['valid_annot'] = False
+                        else:
+                            s = self.gene_association_sents[sent_assoc['sent']]
+                            print(
+                                s.text.replace(
+                                    s.text[assoc[3][0]:assoc[3][1]],colors.red | s.text[assoc[3][0]:assoc[3][1]]
+                                ).replace(
+                                    assoc[2], colors.green | assoc[2]
+                                )
                             )
-                        )
-                        feedback = input()
-                        if feedback == '?':
-                            print('abstract') #TODO if ? show abstract
                             feedback = input()
-                        elif feedback == '!': skipAliases.add(assoc[2])
-                        elif feedback == '!!': skipGene = True
-                        sent_assoc['valid_annot'] = feedback if feedback in ('+', '-', 'x') else False
+                            if feedback == '?':
+                                print('abstract')
+                                feedback = input()
+                            elif feedback == '!': skipAliases.add(assoc[2])
+                            elif feedback == '!!': skipGene = True
+                            sent_assoc['valid_annot'] = feedback if feedback in ('+', '-', 'x') else False
+                        if store: stored_annots[sent_store_key] = sent_assoc['valid_annot']
         self.curated_gene_associations = [
             (gene,assoc,sent_assoc)
             for gene in self.gene_association
