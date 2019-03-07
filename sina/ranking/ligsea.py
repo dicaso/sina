@@ -186,7 +186,14 @@ class Ligsea(object):
                     if skipGene:
                         sent_assoc['valid_annot'] = False
                     else:
-                        print(self.gene_association_sents[sent_assoc['sent']])
+                        s = self.gene_association_sents[sent_assoc['sent']]
+                        print(
+                            s.text.replace(
+                                s.text[assoc[3][0]:assoc[3][1]],colors.red | s.text[assoc[3][0]:assoc[3][1]]
+                            ).replace(
+                                assoc[2], colors.green | assoc[2]
+                            )
+                        )
                         feedback = input()
                         if feedback == '?':
                             print('abstract') #TODO if ? show abstract
