@@ -93,15 +93,16 @@ class Ligsea(object):
                     before_assoc_match = True
                     inbetween_feature_vectors = {}
                     for token in sent:
+                        association_key = (association['pmid'],association['date'],token.text,(assoc_match.start(),assoc_match.end()))
                         # First check if still before match
                         if (assoc_match.start() < token.idx - sent_startposition) and before_assoc_match:
                             before_assoc_match = False
                             #Store before_assoc_match featurevectors
                             for iv in inbetween_feature_vectors:
                                 if not iv in self.gene_association: self.gene_association[iv] = {}
-                                if (association['pmid'],association['date'],token.text) not in self.gene_association[iv]:
-                                    self.gene_association[iv][(association['pmid'],association['date'],token.text)] = []
-                                self.gene_association[iv][(association['pmid'],association['date'],token.text)].append(
+                                if association_key not in self.gene_association[iv]:
+                                    self.gene_association[iv][association_key] = []
+                                self.gene_association[iv][association_key].append(
                                     inbetween_feature_vectors[iv]
                                 )
                             inbetween_feature_vector = {p:0 for p in pos_of_interest}
@@ -130,9 +131,9 @@ class Ligsea(object):
                             if gene_symbol:
                                 for gs in gene_symbol:
                                     if not gs in self.gene_association: self.gene_association[gs] = {}
-                                    if (association['pmid'],association['date'],token.text) not in self.gene_association[gs]:
-                                        self.gene_association[gs][(association['pmid'],association['date'],token.text)] = []
-                                    self.gene_association[gs][(association['pmid'],association['date'],token.text)].append(
+                                    if association_key not in self.gene_association[gs]:
+                                        self.gene_association[gs][association_key] = []
+                                    self.gene_association[gs][association_key].append(
                                         inbetween_feature_vector.copy()
                                     )
                                 self.gene_association_sents[hash(sent)] = sent
