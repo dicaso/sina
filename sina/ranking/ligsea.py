@@ -93,7 +93,18 @@ class Ligsea(object):
                     before_assoc_match = True
                     inbetween_feature_vectors = {}
                     for token in sent:
-                        association_key = (association['pmid'],association['date'],token.text,(assoc_match.start(),assoc_match.end()))
+                        # Only looking up if gene symbol if it is not likely to be a general English word
+                        gene_symbol = (
+                            None if (token.text.isalpha() and (token.is_sent_start or token.text.islower()))
+                            else self.get_gene_symbol(token.text)
+                        )
+                        if gene_symbol:
+                        #    import pdb; pdb.set_trace()
+                            association_key = (
+                                association['pmid'],association['date'],token.text,(assoc_match.start(),assoc_match.end())
+                            )
+                        else:
+                            association_key = None
                         # First check if still before match
                         if (assoc_match.start() < token.idx - sent_startposition) and before_assoc_match:
                             before_assoc_match = False
@@ -107,13 +118,6 @@ class Ligsea(object):
                                 )
                             inbetween_feature_vector = {p:0 for p in pos_of_interest}
                             inbetween_feature_vector['sent'] = hash(sent)
-                        # Only looking up if gene symbol if it is not likely to be a general English word
-                        gene_symbol = (
-                            None if (token.text.isalpha() and (token.is_sent_start or token.text.islower()))
-                            else self.get_gene_symbol(token.text)
-                        )
-                        #if gene_symbol:
-                        #    import pdb; pdb.set_trace()
                         if before_assoc_match:
                             if gene_symbol:
                                 # For previous genes update GENE count (TODO retroactive for genes coming after)
