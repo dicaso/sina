@@ -186,7 +186,7 @@ class PubmedCollection(BaseDocumentCollection):
         querystr = query
         print()
         for indexdir in range(total_idirs):
-            indexdir = os.path.join(self.location,'.index',indexdir)
+            indexdir = os.path.join(self.location,'.index',str(indexdir))
             print('\rProcessing shard %s/%s' % (os.path.basename(indexdir),total_idirs), end='')
             ix = index.open_dir(indexdir)
             query = QueryParser("content", ix.schema).parse(querystr)
