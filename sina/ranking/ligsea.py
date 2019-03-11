@@ -188,7 +188,8 @@ class Ligsea(object):
         print(
             colors.red | (
                 'Type "?" to see the abstract, "!" to skip gene alias and "!!" to skip entire gene,\n'+
-                '"+" if positive association, "-" for negative association, '+
+                '"+" if strong positive association, "+-" if weak positive association,\n'+
+                '"-" for strong negative association, "-+" if weak negative association,\n'+
                 '"x" for unclear association, anything else if invalid association.'
             )
         )
@@ -225,7 +226,7 @@ class Ligsea(object):
                                 feedback = input()
                             elif feedback == '!': skipAliases.add(assoc[2])
                             elif feedback == '!!': skipGene = True
-                            sent_assoc['valid_annot'] = feedback if feedback in ('+', '-', 'x') else False
+                            sent_assoc['valid_annot'] = feedback if feedback in ('+', '+-', '-', '-+', 'x') else False
                         if store: stored_annots[sent_store_key] = sent_assoc['valid_annot']
         self.curated_gene_associations = [
             (gene,assoc,sent_assoc)
@@ -241,7 +242,8 @@ class Ligsea(object):
             'date':[c[1][1] for c in self.curated_gene_associations],
             'pmid':[c[1][0] for c in self.curated_gene_associations],
             'sent':[c[2]['sent'] for c in self.curated_gene_associations],
-            'featurevec':[c[2] for c in self.curated_gene_associations]
+            'featurevec':[c[2] for c in self.curated_gene_associations],
+            'annot': [c[2]['valid_annot'] for c in self.curated_gene_associations]
         })
 
     def plot_ranked_gene_associations(self):
@@ -355,7 +357,7 @@ class Ligsea(object):
             lambda x: None if x is None else self.genetable[self.rankcol][x]
         )
         
-    def predict_number_of_relevant_genes(self,plot=True,surges=1):
+    def predict_number_of_relevant_genes(self,plot=True,surges=1,predict_future_years=50):
         """Predict number of relevant genes
         as they have been discovered through time.
 
@@ -364,9 +366,11 @@ class Ligsea(object):
 
         Args:
             plot (bool): If plotting is not necessary, it can be disabled.
-            surges (int): Number of periods of exponential-like discoveries
+            surges (int): Number of periods of exponential-like discoveries.
+            predict_future_years (int): Number of years in the future to show
+              fitted curve.
         """
-        import numpy as np
+        import numpy as np, datetime
         from scipy.optimize import curve_fit
         import matplotlib.pyplot as plt
         assoc_data = self.curated_gene_associations[~self.curated_gene_associations.gene.duplicated()].copy()
@@ -398,6 +402,20 @@ class Ligsea(object):
         popt, pcov = curve_fit(sigmoid_func, xdata_norm, ydata, p0=p0, bounds=bounds)
         total_expected = popt[0]+popt[1] if surges==1 else popt[0]+popt[1]+popt[7] # A+K if surges==1 else A1+K1+K2
         if plot:
-            ax.plot(assoc_data.date.values, sigmoid_func(xdata_norm, *popt), 'r-', label='fit')
+            if predict_future_years:
+                # Get start date
+                unix_epoch = np.datetime64(0, 's')
+                one_second = np.timedelta64(1, 's')
+                first_discovery_date = datetime.datetime.utcfromtimestamp(
+                    (assoc_data.date.values[0] - unix_epoch) / one_second # convert to seconds
+                )
+                preddates = [
+                    first_discovery_date + datetime.timedelta(days=365*y)
+                    for y in range(predict_future_years)
+                ]
+                pred_norm = [(d.timestamp()-xdata.min())/xdata.max() for d in preddates]
+                ax.plot(preddates, sigmoid_func(pred_norm, *popt), 'r-', label='fit')
+            else:
+                ax.plot(assoc_data.date.values, sigmoid_func(xdata_norm, *popt), 'r-', label='fit')
             ax.axhline(total_expected,c='r')
         return total_expected
