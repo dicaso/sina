@@ -5,7 +5,7 @@ Processes an experimentally ranked list and makes a comparison
 with the liturature in a certain topical field and association with
 a keyphrase noun chunk.
 """
-import re, pandas as pd
+import re, pandas as pd, numpy as np
 from sina.documents import PubmedCollection
 
 class Ligsea(object):
@@ -246,11 +246,18 @@ class Ligsea(object):
             'annot': [c[2]['valid_annot'] for c in self.curated_gene_associations]
         })
 
-    def plot_ranked_gene_associations(self):
+    def plot_ranked_gene_associations(self,aggregate=np.mean):
+        """Plot the associations of the ranked genes
+
+        Args:
+            aggregate: function to apply if a gene has more than one rank
+              value, the function needs to return the same value if only one
+              value is provided (e.g. np.mean, np.max, np.min)
+        """
         import matplotlib.pyplot as plt
         genetable = self.genetable.set_index(self.genecol)
         self.curated_gene_associations['ranks'] = [
-            genetable[self.rankcol][g] if g in genetable.index else None
+            aggregate(genetable[self.rankcol][g]) if g in genetable.index else None
             for g in self.curated_gene_associations.gene
         ]
         fig,ax = plt.subplots()
@@ -372,7 +379,7 @@ class Ligsea(object):
             predict_future_years (int): Number of years in the future to show
               fitted curve.
         """
-        import numpy as np, datetime
+        import datetime
         from scipy.optimize import curve_fit
         import matplotlib.pyplot as plt
         assoc_data = self.curated_gene_associations[~self.curated_gene_associations.gene.duplicated()].copy()
