@@ -248,8 +248,9 @@ class Ligsea(object):
 
     def plot_ranked_gene_associations(self):
         import matplotlib.pyplot as plt
+        genetable = self.genetable.set_index(self.genecol)
         self.curated_gene_associations['ranks'] = [
-            self.genetable[self.rankcol][g] if g in self.genetable[self.genecol] else None
+            genetable[self.rankcol][g] if g in genetable.index else None
             for g in self.curated_gene_associations.gene
         ]
         fig,ax = plt.subplots()
@@ -257,7 +258,7 @@ class Ligsea(object):
             self.curated_gene_associations.dropna().date.values,
             self.curated_gene_associations.dropna().ranks.values
         )
-        ax.set_ylim((self.genetable[self.rankcol].min(),self.genetable[self.rankcol].max()))
+        ax.set_ylim((genetable[self.rankcol].min(),genetable[self.rankcol].max()))
 
     def calculate_nulldistro(self, n, nulldistrosize):
         """Calculate a nulldistribution from the genetable ranks
