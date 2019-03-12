@@ -261,11 +261,17 @@ class Ligsea(object):
             for g in self.curated_gene_associations.gene
         ]
         fig,ax = plt.subplots()
+        first_gene_mention = ~self.curated_gene_associations.gene.duplicated()
         ax.scatter(
-            self.curated_gene_associations.dropna().date.values,
-            self.curated_gene_associations.dropna().ranks.values
+            self.curated_gene_associations[first_gene_mention].dropna().date.values,
+            self.curated_gene_associations[first_gene_mention].dropna().ranks.values
+        )
+        ax.scatter(
+            self.curated_gene_associations[~first_gene_mention].dropna().date.values,
+            self.curated_gene_associations[~first_gene_mention].dropna().ranks.values
         )
         ax.set_ylim((genetable[self.rankcol].min(),genetable[self.rankcol].max()))
+        return ax
 
     def calculate_nulldistro(self, n, nulldistrosize):
         """Calculate a nulldistribution from the genetable ranks
@@ -284,7 +290,7 @@ class Ligsea(object):
             )
         return pd.Series(random_permutation_results).sort_values()
 
-    def calculate_enrichment(self,rel_alpha=.05,ascending=None,nulldistrosize=1000,max_enrich=None):
+    def calculate_enrichment(self,rel_alpha=.05,ascending=None,nulldistrosize=1000,max_enrich=None,plot=True):
         """Caclulate enrichment set for each time point
 
         Args:
@@ -301,11 +307,15 @@ class Ligsea(object):
               the density of geneset genes and other genes becomes lower than that of the
               originally found enriched set.
         """
+        # Prepare genetable
+        genetable = self.genetable.set_index(self.genecol)
+        genetable = genetable[(~genetable.index.isna())&(~genetable.index.duplicated())]
+        
         # Select only first mentions of gene associations
         assoc_data = self.curated_gene_associations[~self.curated_gene_associations.gene.duplicated()]
         # Set rank type
         ascending_ranks = (
-            self.genetable[self.rankcol].is_monotonic_increasing
+            genetable[self.rankcol].is_monotonic_increasing
             if ascending is None else ascending
         )
         if not hasattr(self,'nulldistros'):
@@ -342,9 +352,9 @@ class Ligsea(object):
                 if stratum_top_size+1 not in self.nulldistros:
                     self.nulldistros[stratum_top_size+1] = self.calculate_nulldistro(stratum_top_size+1, nulldistrosize=nulldistrosize)
                 lastTopGene = stratum.gene.iloc[stratum_top_size-1]
-                lastTopGene_i = self.genetable.index.get_loc(lastTopGene)
-                nextGene = self.genetable.index[lastTopGene_i+1]
-                for i,rankvalue in enumerate(self.genetable[self.rankcol].loc[nextGene:]):
+                lastTopGene_i = genetable.index.get_loc(lastTopGene)
+                nextGene = genetable.index[lastTopGene_i+1]
+                for i,rankvalue in enumerate(genetable[self.rankcol].loc[nextGene:]):
                     ranksum = previousTopPassed[1]+rankvalue
                     rankprob = (
                         self.nulldistros[stratum_top_size+1]<=ranksum if ascending_ranks else
@@ -354,17 +364,20 @@ class Ligsea(object):
                 if i-1 < 0:
                     date_relevancies[date] = lastTopGene # relevancy section contains the last top gene
                 else:
-                    date_relevancies[date] = self.genetable.index[lastTopGene_i+i]
+                    date_relevancies[date] = genetable.index[lastTopGene_i+i]
             else: date_relevancies[date] = None
         
         self.date_relevancies = pd.DataFrame(list(date_relevancies.items()),columns=('date','gene'))
         self.date_relevancies['ranks'] = self.date_relevancies.gene.apply(
-            lambda x: None if x is None else self.genetable[self.rankcol][x]
+            lambda x: None if x is None else genetable[self.rankcol][x]
         )
         self.date_relevancies_known_gene = pd.DataFrame(list(date_relevancies_known_gene.items()),columns=('date','gene'))
         self.date_relevancies_known_gene['ranks'] = self.date_relevancies_known_gene.gene.apply(
-            lambda x: None if x is None else self.genetable[self.rankcol][x]
+            lambda x: None if x is None else genetable[self.rankcol][x]
         )
+        if plot:
+            ax = self.plot_ranked_gene_associations()
+            ax.scatter(self.date_relevancies.dropna().date, self.date_relevancies.dropna().ranks)
         
     def predict_number_of_relevant_genes(self,plot=True,surges=1,predict_future_years=50):
         """Predict number of relevant genes
