@@ -249,12 +249,13 @@ class Ligsea(object):
     def plot_ranked_gene_associations(self):
         import matplotlib.pyplot as plt
         self.curated_gene_associations['ranks'] = [
-            self.genetable[self.rankcol][g] for g in self.curated_gene_associations.gene
+            self.genetable[self.rankcol][g] if g in self.genetable[self.genecol] else None
+            for g in self.curated_gene_associations.gene
         ]
         fig,ax = plt.subplots()
         ax.scatter(
-            self.curated_gene_associations.date.values,
-            self.curated_gene_associations.ranks.values
+            self.curated_gene_associations.dropna().date.values,
+            self.curated_gene_associations.dropna().ranks.values
         )
         ax.set_ylim((self.genetable[self.rankcol].min(),self.genetable[self.rankcol].max()))
 

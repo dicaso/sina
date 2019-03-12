@@ -15,7 +15,8 @@ setup(name = 'sina',
           'bidali',
           'pymongo',
           'whoosh',
-          'spacy'
+          'spacy',
+          'textacy'
       ],
       extras_require = {
           'documentation': ['Sphinx']
