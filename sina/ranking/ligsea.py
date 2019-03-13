@@ -303,7 +303,7 @@ class Ligsea(object):
 
     def calculate_enrichment(
             self,rel_alpha=.05,ascending=None,nulldistrosize=1000,max_enrich=None,
-            plot=True, enrich_color='g', enrich_marker='+'
+            plot=True, enrich_color='g', enrich_marker='+', enrich_line=True
         ):
         """Caclulate enrichment set for each time point
 
@@ -391,7 +391,8 @@ class Ligsea(object):
         )
         if plot:
             ax = self.plot_ranked_gene_associations()
-            ax.scatter(
+            plotfn = ax.plot if enrich_line else ax.scatter
+            plotfn(
                 self.date_relevancies.dropna().date, self.date_relevancies.dropna().ranks,
                 c=enrich_color, marker=enrich_marker
             )
