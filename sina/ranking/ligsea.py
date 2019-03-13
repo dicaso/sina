@@ -246,13 +246,14 @@ class Ligsea(object):
             'annot': [c[2]['valid_annot'] for c in self.curated_gene_associations]
         })
 
-    def plot_ranked_gene_associations(self,aggregate=np.mean):
+    def plot_ranked_gene_associations(self,aggregate=np.mean,geneLines=True):
         """Plot the associations of the ranked genes
 
         Args:
             aggregate: function to apply if a gene has more than one rank
               value, the function needs to return the same value if only one
               value is provided (e.g. np.mean, np.max, np.min)
+            geneLines (bool): draw lines from first mention of a gene.
         """
         import matplotlib.pyplot as plt
         genetable = self.genetable.set_index(self.genecol)
@@ -266,11 +267,21 @@ class Ligsea(object):
             self.curated_gene_associations[first_gene_mention].dropna().date.values,
             self.curated_gene_associations[first_gene_mention].dropna().ranks.values
         )
+        if geneLines:
+            ax.hlines(
+                self.curated_gene_associations[first_gene_mention].dropna().ranks.values,
+                self.curated_gene_associations[first_gene_mention].dropna().date.values,
+                self.curated_gene_associations[first_gene_mention].dropna().date.max(),
+                color = 'b'
+            )
         ax.scatter(
             self.curated_gene_associations[~first_gene_mention].dropna().date.values,
             self.curated_gene_associations[~first_gene_mention].dropna().ranks.values
         )
         ax.set_ylim((genetable[self.rankcol].min(),genetable[self.rankcol].max()))
+        ax.set_xlabel('publication year')
+        ax.set_ylabel('gene rank')
+        ax.set_title('Experimentally ranked <%s> associated <%s> genes' % (self.assoc.pattern, self.topic))
         return ax
 
     def calculate_nulldistro(self, n, nulldistrosize):
@@ -290,7 +301,10 @@ class Ligsea(object):
             )
         return pd.Series(random_permutation_results).sort_values()
 
-    def calculate_enrichment(self,rel_alpha=.05,ascending=None,nulldistrosize=1000,max_enrich=None,plot=True):
+    def calculate_enrichment(
+            self,rel_alpha=.05,ascending=None,nulldistrosize=1000,max_enrich=None,
+            plot=True, enrich_color='g', enrich_marker='+'
+        ):
         """Caclulate enrichment set for each time point
 
         Args:
@@ -377,7 +391,10 @@ class Ligsea(object):
         )
         if plot:
             ax = self.plot_ranked_gene_associations()
-            ax.scatter(self.date_relevancies.dropna().date, self.date_relevancies.dropna().ranks)
+            ax.scatter(
+                self.date_relevancies.dropna().date, self.date_relevancies.dropna().ranks,
+                c=enrich_color, marker=enrich_marker
+            )
         
     def predict_number_of_relevant_genes(self,plot=True,surges=1,predict_future_years=50):
         """Predict number of relevant genes
@@ -440,4 +457,7 @@ class Ligsea(object):
             else:
                 ax.plot(assoc_data.date.values, sigmoid_func(xdata_norm, *popt), 'r-', label='fit')
             ax.axhline(total_expected,c='r')
+            ax.set_xlabel('publication year')
+            ax.set_ylabel('# of genes')
+            ax.set_title('<%s> associated <%s> genes' % (self.assoc.pattern, self.topic))
         return total_expected
