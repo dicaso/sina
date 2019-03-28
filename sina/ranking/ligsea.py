@@ -29,9 +29,12 @@ class Ligsea(object):
     Example:
         >>> from sina.ranking.ligsea import Ligsea
         >>> lg = Ligsea('neuroblastoma', 'metasta', '/tmp/mock.csv', 'gene_col')
-        >>> lg.retrieve_associations()
+        >>> lg.retrieve_documents()
         >>> lg.determine_gene_associations() #issue downloading genenames
         >>> lg.evaluate_gene_associations()
+        >>> lg.predict_number_of_relevant_genes(surges=1)
+        >>> lg.plot_ranked_gene_associations()
+        >>> lg.calculate_enrichment()
     """
     def __init__(self, topic_query, assoc_regex, gene_table_file, gene_column, rank_column='ranks', assoc_regex_flags=re.IGNORECASE, **kwargs):
         self.topic = topic_query
@@ -47,7 +50,37 @@ class Ligsea(object):
         self.genecol = gene_column
         self.rankcol = rank_column
 
-    def retrieve_associations(self, corpus_class=PubmedCollection, corpus_location='~/pubmed'):
+    def to_json(self, filename, attributes={'documents','associations','gene_association','gene_association_sents'}):
+        """Save object state to json, by default all documents and attributes provided in
+        extra_attributes.
+        
+        Args:
+            attributes (set): the set of attributes to save.
+
+        TODO: does not work yet for gene_association, because it has tuple keys
+        """
+        import json, os
+        class DTEncoder(json.JSONEncoder): 
+            def default(self, o):
+                if isinstance(o,datetime.datetime):
+                    return ('timestamp', o.timestamp())
+                else:
+                    return super().default(o)
+                    
+        json.dump(
+            {
+                attr: getattr(self, attr)
+                for attr in set(attributes)&set(dir(self))
+            },
+            os.path.expanduser(filename),
+            cls = DTEncoder
+        )
+
+    def from_json(self):
+        """Load in object from json file"""
+        raise NotImplementedError
+
+    def retrieve_documents(self, corpus_class=PubmedCollection, corpus_location='~/pubmed'):
         """Retrieve associations within the specified `corpus_class`.
 
         Args:
@@ -204,7 +237,7 @@ class Ligsea(object):
                     for sent_assoc in self.gene_association[gene][assoc]:
                         sent_store_key = str((
                             hashlib.md5(self.gene_association_sents[sent_assoc['sent']].text.encode()).hexdigest(),
-                            assoc[2], assoc[3] # gene alias and regex match positions
+                            gene, assoc[2], assoc[3] # gene alias and regex match positions
                         ))
                         if not revaluate and sent_store_key in stored_annots:
                             sent_assoc['valid_annot'] = stored_annots[sent_store_key]

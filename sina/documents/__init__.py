@@ -215,3 +215,28 @@ class PubmedCollection(BaseDocumentCollection):
         self.process_documents(callback, filteredList=filteredList)
         return filteredList
     
+    def build_xml_index(self):
+        """Iterates over all the documents and saves for each pmid the file and corresponding
+        positions.
+        """
+        import sqlite3, re
+        xmlfilenames = glob.glob(os.path.join(self.location,'*.xml.gz'))
+        articlere = re.compile(b'<PubmedArticle>.+?</PubmedArticle>', re.MULTILINE | re.DOTALL)
+        pmidre = re.compile(b'<PMID.+?>(\d+)</PMID>')
+        conn = sqlite3.connect(os.path.join(self.location,'pmid_locations.db'))
+        c = conn.cursor()
+        c.execute('''CREATE TABLE ablocations
+             (pmid text, filename text, start integer, length integer)''')
+        conn.commit()
+        for i,xmlfilename in enumerate(xmlfilenames):
+            print('\r',i,end='',sep='')
+            basename = os.path.basename(xmlfilename)
+            with gzip.open(xmlfilename) as xmlfilehandler:
+                xmlcontent = xmlfilehandler.read()
+                for article in articlere.finditer(xmlcontent):
+                    pmid = pmidre.search(article.group()).groups()[0].decode()
+                    c.execute("INSERT INTO ablocations VALUES ('{}','{}',{},{})".format(
+                        pmid, basename, article.start(), article.end()-article.start()
+                    ))
+            conn.commit()
+        conn.close()
