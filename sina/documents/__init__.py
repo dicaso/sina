@@ -219,15 +219,21 @@ class PubmedCollection(BaseDocumentCollection):
         """Iterates over all the documents and saves for each pmid the file and corresponding
         positions.
         """
-        import sqlite3, re
+        import re, shelve#, sqlite3
         xmlfilenames = glob.glob(os.path.join(self.location,'*.xml.gz'))
         articlere = re.compile(b'<PubmedArticle>.+?</PubmedArticle>', re.MULTILINE | re.DOTALL)
         pmidre = re.compile(b'<PMID.+?>(\d+)</PMID>')
-        conn = sqlite3.connect(os.path.join(self.location,'pmid_locations.db'))
-        c = conn.cursor()
-        c.execute('''CREATE TABLE ablocations
-             (pmid text, filename text, start integer, length integer)''')
-        conn.commit()
+        locshelve = shelve.open(os.path.join(self.location,'pmid_locations.shelve'))
+        # Chose a shelve instead of sqlite db for time reasons
+        #  In: %timeit locshelve[pmid]
+        #  2.96 µs ± 462 ns per loop (mean ± std. dev. of 7 runs, 100000 loops each)
+        #  In: %timeit c.execute('SELECT * FROM ablocations WHERE pmid=?', (pmid,)).fetchone()
+        #  5.72 s ± 38.7 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+        #conn = sqlite3.connect(os.path.join(self.location,'pmid_locations.db'))
+        #c = conn.cursor()
+        #c.execute('''CREATE TABLE ablocations
+        #     (pmid text, filename text, start integer, length integer)''')
+        #conn.commit()
         for i,xmlfilename in enumerate(xmlfilenames):
             print('\r',i,end='',sep='')
             basename = os.path.basename(xmlfilename)
@@ -235,8 +241,36 @@ class PubmedCollection(BaseDocumentCollection):
                 xmlcontent = xmlfilehandler.read()
                 for article in articlere.finditer(xmlcontent):
                     pmid = pmidre.search(article.group()).groups()[0].decode()
-                    c.execute("INSERT INTO ablocations VALUES ('{}','{}',{},{})".format(
-                        pmid, basename, article.start(), article.end()-article.start()
-                    ))
-            conn.commit()
-        conn.close()
+                    locshelve[pmid] = (basename, article.start(), article.end()-article.start())
+                    #c.execute(
+                    #    "INSERT INTO ablocations VALUES ('?','?',?,?)",
+                    #    (pmid, basename, article.start(), article.end()-article.start())
+                    #)
+            #conn.commit()
+        #conn.close()
+        locshelve.close()
+
+    def retrieve_article_xmls(self, pmids):
+        """Retrieve the xml of a set of articles
+
+        Args:
+            pmids (list): List or any iterable of pmid ids in str format
+
+        Returns:
+            dict of xml trees: pmid key and xml tree value for each article requested
+        """
+        import shelve #sqlite3
+        locshelve = shelve.open(os.path.join(self.location,'pmid_locations.shelve'))
+        #conn = sqlite3.connect(os.path.join(self.location,'pmid_locations.db'))
+        articles = {}
+        #c = conn.cursor()
+        for pmid in pmids:
+            #c.execute('SELECT * FROM ablocations WHERE pmid=?', (pmid,))
+            abref = (pmid,)+ locshelve[pmid] #c.fetchone()
+            with gzip.open(os.path.join(self.location,abref[1])) as xmlfilehandler:
+                xmlfilehandler.seek(abref[2])
+                xmlcontent = xmlfilehandler.read(abref[3])
+                articles[pmid] = ET.fromstring(xmlcontent)
+        locshelve.close()
+        #conn.close()
+        return articles
