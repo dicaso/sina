@@ -35,6 +35,7 @@ class Ligsea(object):
         >>> lg.predict_number_of_relevant_genes(surges=1)
         >>> lg.plot_ranked_gene_associations()
         >>> lg.calculate_enrichment()
+        >>> lg.retrieve_datasets()
     """
     def __init__(self, topic_query, assoc_regex, gene_table_file, gene_column, rank_column='ranks', assoc_regex_flags=re.IGNORECASE, **kwargs):
         self.topic = topic_query
@@ -88,9 +89,8 @@ class Ligsea(object):
               class in which the search will be executed.
             corpus_location (str): Path to corpus directory.
         """
-        corpus = corpus_class('pubmed',corpus_location)
-        self.corpus_location = corpus_location
-        self.documents = corpus.query_document_index(self.topic)
+        self.corpus = corpus_class('pubmed',corpus_location)
+        self.documents = self.corpus.query_document_index(self.topic)
         self.associations = [d for d in self.documents if self.assoc.search(d['content'])]
 
     def determine_gene_associations(self,verbed=True,twosents=False):
@@ -201,7 +201,7 @@ class Ligsea(object):
         else: return None
 
     def get_gene_aliases(self,gene_symbol):
-        return list(self.gene_dict[self.gene_dict.symbol == gene_symbol].alias)
+        return list(self.gene_dict[self.gene_dict.symbol == gene_symbol].alias)        
 
     def evaluate_gene_associations(self,infer=False,store=True,revaluate=False):
         """Curate gene associations made by indicating
@@ -278,6 +278,107 @@ class Ligsea(object):
             'featurevec':[c[2] for c in self.curated_gene_associations],
             'annot': [c[2]['valid_annot'] for c in self.curated_gene_associations]
         })
+
+    def train_gene_evaluations(self, test_size=0.25, random_state=1000):
+        """Based on evaluations already provided
+        build an nlp model to either evaluate associations
+        not yet reviewed, or get an estimate of how consistent
+        the evaluations seem to be.
+
+        Args:
+            test_size (float): Percentage of data for testing.
+            random_state (float): Random seed.
+
+        Reference:
+            https://realpython.com/python-keras-text-classification/
+        """
+        from sklearn.feature_extraction.text import CountVectorizer
+        from sklearn.model_selection import train_test_split
+        from sklearn.linear_model import LogisticRegression
+        df = pd.DataFrame(
+            [
+                (
+                self.gene_association_sents[s_entry['sent']].text,
+                s_entry['valid_annot'] if 'valid_annot' in s_entry else None,
+                gene
+                )
+            for gene in self.gene_association
+            for entry in self.gene_association[gene]
+            for s_entry in self.gene_association[gene][entry]
+            ], columns=['sentence', 'label', 'source']
+        )
+        
+        # Prepare training/test data
+        # Sort df on maximum annotation (sentences that have one strong meaningful annotation
+        # will be retained after removing the duplicates)
+        df['label_int'] = df.label.map(
+            {'x': 0, False: 0, '+-': 1, '+': 2, '-+': -1, '-': -2}
+        )
+        df['label_int_abs'] = df.label_int.abs()
+        df.sort_values('label_int_abs', inplace=True, ascending=False)
+        sentences = df[~df.sentence.duplicated()].dropna().sentence.values #drop unannotated
+        y = df[~df.sentence.duplicated()].dropna().label_int.values
+        sentences_train, sentences_test, y_train, y_test = train_test_split(
+            sentences, y, test_size=test_size, random_state=random_state
+        )
+
+        # Vectorize
+        vectorizer = CountVectorizer(min_df=0, lowercase=False, max_features=10000)
+        vectorizer.fit(sentences_train)
+        X_train = vectorizer.transform(sentences_train)
+        X_test  = vectorizer.transform(sentences_test)
+
+        # Logistic regression
+        classifier = LogisticRegression()
+        classifier.fit(X_train, y_train)
+        score = classifier.score(X_test, y_test)
+        print("Logistic regression accuracy:", score)
+
+        # Neural network classification
+        from keras.models import Sequential
+        from keras import layers
+        input_dim = X_train.shape[1]
+        model = Sequential()
+        model.add(layers.Dense(10, input_dim=input_dim, activation='relu'))
+        model.add(layers.Dense(1, activation='sigmoid'))
+        model.compile(
+            loss='binary_crossentropy',  
+            optimizer='adam',  
+            metrics=['accuracy']
+        )
+        print(model.summary())
+        history = model.fit(
+            X_train, y_train,
+            epochs=100,
+            verbose=False,
+            validation_data=(X_test, y_test),
+            batch_size=10
+        )
+        loss, accuracy = model.evaluate(X_train, y_train, verbose=False)
+        print("Training Accuracy: {:.4f}".format(accuracy))
+        loss, accuracy = model.evaluate(X_test, y_test, verbose=False)
+        print("Testing Accuracy:  {:.4f}".format(accuracy))
+
+        # Plot
+        import matplotlib.pyplot as plt
+        plt.style.use('ggplot')
+        acc = history.history['acc']
+        val_acc = history.history['val_acc']
+        loss = history.history['loss']
+        val_loss = history.history['val_loss']
+        x = range(1, len(acc) + 1)
+
+        plt.figure(figsize=(12, 5))
+        plt.subplot(1, 2, 1)
+        plt.plot(x, acc, 'b', label='Training acc')
+        plt.plot(x, val_acc, 'r', label='Validation acc')
+        plt.title('Training and validation accuracy')
+        plt.legend()
+        plt.subplot(1, 2, 2)
+        plt.plot(x, loss, 'b', label='Training loss')
+        plt.plot(x, val_loss, 'r', label='Validation loss')
+        plt.title('Training and validation loss')
+        plt.legend()
 
     def plot_ranked_gene_associations(self,aggregate=np.mean,geneLines=True):
         """Plot the associations of the ranked genes
@@ -495,3 +596,22 @@ class Ligsea(object):
             ax.set_ylabel('# of genes')
             ax.set_title('<%s> associated <%s> genes' % (self.assoc.pattern, self.topic))
         return total_expected
+
+    def retrieve_datasets(self,only_curated_genes=True):
+        import xml.etree.ElementTree as ET
+        if only_curated_genes:
+            pmids = self.curated_gene_associations.pmid.drop_duplicates()
+        else: pmids = [d['pmid'] for d in lg.documents]
+        self.article_xmls = self.corpus.retrieve_article_xmls(pmids)
+        accarticles = [a for a in self.article_xmls.values() if list(a.iter('AccessionNumberList'))]
+        #other interesting xlm elements CoiStatement, DataBank, DataBankList, GeneSymbolList
+        geos = []
+        for a in accarticles: 
+            for anl in a.iter('AccessionNumberList'):
+                for an in anl.iter('AccessionNumber'):
+                    if an.text.startswith('G'): geos.append(an.text)
+        self.geos = geos
+
+class AnnotaterServer(object):
+    def __init__(self):
+        from flask import Flask, request, render_template

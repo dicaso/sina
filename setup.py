@@ -16,7 +16,10 @@ setup(name = 'sina',
           'pymongo',
           'whoosh',
           'spacy',
-          'textacy'
+          'textacy',
+          'flask',
+          'keras', #requires backend installed such as tensorflow
+          'GEOparse' #GEOquery inspired python package
       ],
       extras_require = {
           'documentation': ['Sphinx']
