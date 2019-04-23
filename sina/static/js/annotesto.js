@@ -3,7 +3,7 @@
     
     const _init = (
 	{
-	    storageUrl = '127.0.0.1:5000',
+	    storageUrl = 'http://127.0.0.1:5000',
 	    container = '',
 	    eventContainer = '',
 	    annotElementTag = 'annot-8',
@@ -21,7 +21,8 @@
 	window.Annotesto.annotContainer = annotContainer;
 	if (annotContainer === null) annotContainer = body;
 	if (eventRegion === null) eventRegion = body;
-	window.Annotesto.legend = legend ? createLegend():false
+	window.Annotesto.legend = legend ? createLegend():false;
+	window.Annotesto.storage = storageUrl ? new Storage(storageUrl):false;
 	eventRegion.addEventListener("mouseup",()=>{
             let selection = window.getSelection();
 	    if (selection.isCollapsed) return;
@@ -80,8 +81,12 @@ class Annotation {
     tag() {
 	let tags = prompt('Tag (separate with ,):', this.tag_annotations);
 	this.tag_annotations = tags;
-	if (tags) this.annotElement.style.backgroundColor = Annotesto.legend(tags);
-	else this.deleteAnnotation();
+	if (tags) {
+	    this.annotElement.style.backgroundColor = Annotesto.legend(tags);
+	    if (window.Annotesto.storage) window.Annotesto.storage.sendAnnotation(this)
+		.then(data => console.log(JSON.stringify(data)))
+		.catch(error => console.error(error));
+	} else this.deleteAnnotation();
     }
 
     spanSelection() {
@@ -116,7 +121,26 @@ class Annotation {
 
 class Storage{
     constructor(url) {
-	this.url= url;
+	this.url= url.replace(/\/$/,"")+'/api';
+    }
+
+    sendAnnotation(annotation) {
+	return fetch(this.url+'/annotations', {
+	    //Info: https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
+            method: "POST", 
+            mode: "cors",
+            cache: "no-cache",
+            credentials: "same-origin",
+            headers: {
+		"Content-Type": "application/json",
+            },
+            redirect: "follow", // manual, *follow, error
+            body: JSON.stringify(annotation),
+	})
+	    .then(response => response.json());
+    }
+
+    fetchAnnotations(){
     }
 }
 
