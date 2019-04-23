@@ -613,5 +613,44 @@ class Ligsea(object):
         self.geos = geos
 
 class AnnotaterServer(object):
-    def __init__(self):
+    def __init__(self, sentences, host='127.0.0.1'):
+        """Annotation server
+
+        References:
+            https://www.w3.org/TR/annotation-model/
+            https://en.wikipedia.org/wiki/Web_annotation
+            http://docs.annotatorjs.org
+            https://www.w3.org/TR/selection-api/
+        
+        Args:
+            sentences (list): list of sentence strings to annotate
+            host (str): host ip
+        """
         from flask import Flask, request, render_template
+        self.app = Flask('sina') #needs to be package name, where templates/static folder can be found!
+        self.host = host
+        self.sentences = sentences
+
+    def run(self, debug=False):
+        from flask import Flask, request, render_template, jsonify
+        @self.app.route('/<int:sent_id>')
+        def index(sent_id=0):
+            return render_template('index.html',sentence=self.sentences[sent_id])
+
+        @self.app.route('/api/annotations',methods=['GET','POST'])
+        def api():
+            self.app.logger.debug(request.json)
+            # POST data looks like
+            #{'quote': 'there', 'ranges': [{'start': '', 'startOffset': 53, 'end': '', 'endOffset': 58}], 'text': '', 'tags': ['first']}
+            if request.json:
+                return jsonify({'id': 0})
+
+        @self.app.route('/api/search',methods=['GET'])
+        def search():
+            self.app.logger.debug(request.form)
+            return jsonify(
+                {'quote': 'sent', 'ranges': [{'start': '/div[1]/div[2]', 'startOffset': 10, 'end': '/div[1]/div[2]', 'endOffset': 14}], 'text': '', 'tags': ['first']}
+            )
+            
+        self.app.run(host=self.host, debug=debug)
+

@@ -24,6 +24,13 @@ setup(name = 'sina',
       extras_require = {
           'documentation': ['Sphinx']
       },
+      package_data = {
+          'sina': [
+              'templates/index.html',
+              'static/js/main.js'
+          ]
+      },
+      include_package_data = True,
       zip_safe = False,
       #entry_points = {
       #    'console_scripts': ['getLSDataset=LSD.command_line:main'],
