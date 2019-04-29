@@ -614,7 +614,7 @@ class Ligsea(object):
         self.geos = geos
 
 class AnnotaterServer(object):
-    def __init__(self, sentences, host='127.0.0.1'):
+    def __init__(self, sentences, annotations=None, host='127.0.0.1'):
         """Annotation server
 
         References:
@@ -631,10 +631,12 @@ class AnnotaterServer(object):
         self.app = Flask('sina') #needs to be package name, where templates/static folder can be found!
         self.host = host
         self.sentences = sentences
-        self.annotations = OrderedDict()
+        self.annotations = annotations if annotations else OrderedDict()
 
     def run(self, debug=False):
         from flask import Flask, request, render_template, jsonify
+
+        @self.app.route('/')
         @self.app.route('/<int:sent_id>')
         def index(sent_id=0):
             if sent_id in self.annotations:
@@ -702,6 +704,20 @@ class AnnotaterServer(object):
                 }
             )
 
+        @self.app.route('/api/tags',methods=['GET'])
+        def get_tags():
+            return jsonify(
+                sorted({
+                    self.annotations[d][1][a]['tag_annotations'] for d in self.annotations for a in self.annotations[d][1]
+                })
+            )
+
+        @self.app.route('/quit')
+        def shutdown():
+            shutdown_hook = request.environ.get('werkzeug.server.shutdown')
+            if shutdown_hook is not None:
+                shutdown_hook()
+            return 'Server shutdown'
         
         self.app.run(host=self.host, debug=debug)
 

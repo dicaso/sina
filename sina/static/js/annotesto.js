@@ -8,7 +8,8 @@
 	    eventContainer = '',
 	    annotElementTag = 'annot-8',
 	    legend = true,
-	    startColor = null // should be ]0-1] to have same selection of colors
+	    startColor = null, // should be ]0-1] to have same selection of colors
+	    preloadTags = true
 	}
     )=>{
 	let body = document.getElementsByTagName("body")[0];
@@ -27,7 +28,7 @@
 
 	// Legend and storage options
 	window.Annotesto.legend = legend ? createLegend(startColor):false;
-	window.Annotesto.storage = storageUrl ? new Storage(storageUrl):false;
+	window.Annotesto.storage = storageUrl ? new Storage(storageUrl,preloadTags):false;
 
 	// Initialise annotation documents
 	window.Annotesto.doc = new ADoc(
@@ -187,9 +188,10 @@ class Annotation {
 }
 
 class Storage{
-    constructor(url) {
+    constructor(url,loadLegendTags) {
 	this.url= url.replace(/\/$/,"")+'/api';
 	this.fetchAnnotations();
+	if (loadLegendTags) this.fetchTags();
     }
 
     sendAnnotation(annotation) {
@@ -283,6 +285,19 @@ class Storage{
 	})
 	    .then(response => response.json())
 	    .then(response => console.log(response));
+    }
+
+    fetchTags() {
+	return fetch(this.url+'/tags', {
+            method: "GET", 
+            mode: "cors",
+            credentials: "same-origin",
+            headers: {
+		"Content-Type": "application/json",
+            },
+	})
+	    .then(response => response.json())
+	    .then(response => response.forEach(a => window.Annotesto.legend(a)))
     }
 }
 
