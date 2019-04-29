@@ -7,21 +7,24 @@
 	    container = '',
 	    eventContainer = '',
 	    annotElementTag = 'annot-8',
-	    legend = true
+	    legend = true,
+	    startColor = null // should be ]0-1] to have same selection of colors
 	}
     )=>{
-	let annotationsMade = 0;
-	let annotContainer = document.getElementById(container);
+	let body = document.getElementsByTagName("body")[0];
+	let annotContainer = container ?
+	    document.getElementById(container):body;
 	let AnnotElement = document.registerElement(annotElementTag);
 	let AnnotElementRe = new RegExp('<\/?'+annotElementTag+'.*?>', 'g');
-	let eventRegion = document.getElementById(eventContainer);
-	let body = document.getElementsByTagName("body")[0];
+	let eventRegion = eventContainer ?
+	    document.getElementById(eventContainer):body;
+	let annotationsMade = 0;
+	window.Annotesto.config = Object(null);
+	window.Annotesto.config.annotElementTag = annotElementTag;
 	window.Annotesto.pristineText = annotContainer.innerText;
 	window.Annotesto.pristineHTML = annotContainer.innerHTML.split(AnnotElementRe).join('');
 	window.Annotesto.annotContainer = annotContainer;
-	if (annotContainer === null) annotContainer = body;
-	if (eventRegion === null) eventRegion = body;
-	window.Annotesto.legend = legend ? createLegend():false;
+	window.Annotesto.legend = legend ? createLegend(startColor):false;
 	window.Annotesto.storage = storageUrl ? new Storage(storageUrl):false;
 	eventRegion.addEventListener("mouseup",()=>{
             let selection = window.getSelection();
@@ -43,6 +46,8 @@
 		}
 	    }
 	});
+	// Initialise annotation documents
+	window.Annotesto.doc = new ADoc(0,annotContainer);
 	console.log("Annotator Initialised");
     }
     
@@ -53,16 +58,58 @@
     }
 })(window);
 
+class ADoc { // Annotation document - could be one per page or more
+    constructor(id,adocElement,init_tags) { //adocElement -> will put a button before
+	this.type = 'doc_annotation';
+	this.origin = document.baseURI;
+	this.id = id;
+	this.adocElement = adocElement;
+	this.doc_annotations = init_tags?init_tags:'';
+	this.createButton();
+	
+	// If connected storage retrieve document annotation
+	if (window.Annotesto.storage)
+	    window.Annotesto.storage.fetchDocAnnotation(this.id)
+	    .then(response => this.button.innerText = response['doc_tags']);
+    }
+
+    createButton() {
+	this.button = document.createElement('button');
+	this.button.id = 'adoc-' + this.id;
+	this.button.innerText = this.doc_annotations;
+	this.adocElement.parentNode.insertBefore(
+	    this.button,
+	    this.adocElement
+	);
+	this.button.addEventListener('click', e => {
+	    let prevAnnot = this.doc_annotations;
+	    this.doc_annotations = prompt('Document tags (separate with ,):', this.doc_annotations);
+	    this.button.innerText = this.doc_annotations;
+	    if (prevAnnot !== this.doc_annotations && window.Annotesto.storage) window.Annotesto.storage.sendAnnotation(this);
+	});
+    }
+}
+
 class Annotation {
-    constructor(range,id,annotElement) {
+    constructor(range,id,annotElement,init_tags) {
+	this.type = 'segment_annotation';
+	this.origin = document.baseURI;
 	this.originalRange = range.cloneRange();
 	this.label = range.toString();
 	this.id = id;
 	this.previousTextMatches();
 	this.annotElement = annotElement; //document.createElement('span');
-	this.annotElement.setAttribute('data-id', id);
-	this.annotElement.className = 'annot-8hl';
-	this.annotElement.style.backgroundColor = 'rgba(255,255,0,0.3)'
+	if (!init_tags) { // First time annotation
+	    this.annotElement.setAttribute('data-id', id);
+	    this.annotElement.className = 'annot-8hl';
+	} else { // Previously annotated tags have been provided
+	    this.tag_annotations = init_tags.join(', ');
+	    this.annotElement.className = 'annot-8hl,annot-prev';
+	    this.annotElement.style.backgroundColor = window.Annotesto.legend ?
+		window.Annotesto.legend(this.tag_annotations):'rgba(255,255,0,0.3)';
+	    this.prevContent = document.createDocumentFragment();
+	    this.prevContent.append(annotElement.innerHTML);
+	}
 	this.annotElement.addEventListener("click",()=>{
 	    this.tag();
 	});
@@ -79,11 +126,15 @@ class Annotation {
     }
     
     tag() {
+	let prevTags = this.tag_annotations;
+	let wasTagged = Boolean(prevTags);
 	let tags = prompt('Tag (separate with ,):', this.tag_annotations);
 	this.tag_annotations = tags;
 	if (tags) {
 	    this.annotElement.style.backgroundColor = Annotesto.legend(tags);
-	    if (window.Annotesto.storage) window.Annotesto.storage.sendAnnotation(this)
+	    if (window.Annotesto.storage && wasTagged && (prevTags !== tags))
+		window.Annotesto.storage.updateAnnotation(this);
+	    else if (window.Annotesto.storage) window.Annotesto.storage.sendAnnotation(this)
 		.then(data => console.log(JSON.stringify(data)))
 		.catch(error => console.error(error));
 	} else this.deleteAnnotation();
@@ -96,6 +147,10 @@ class Annotation {
     }
 
     deleteAnnotation() {
+	if (window.Annotesto.storage)
+	    // Could delete html annotation only after storage confirmation
+	    // but interactively might look weird
+	    window.Annotesto.storage.deleteAnnotation(this);
 	let range = this.range;
 	range.extractContents(); // cannot use this.range after extracting element
 	range.insertNode(this.prevContent);
@@ -122,6 +177,7 @@ class Annotation {
 class Storage{
     constructor(url) {
 	this.url= url.replace(/\/$/,"")+'/api';
+	this.fetchAnnotations();
     }
 
     sendAnnotation(annotation) {
@@ -141,6 +197,75 @@ class Storage{
     }
 
     fetchAnnotations(){
+	let annotels = document.getElementsByTagName(window.Annotesto.config.annotElementTag);
+	for (let i=0; i<annotels.length; i++) {
+	    let dataid = annotels[i].getAttribute('data-id')
+	    console.log('Retrieving annotation '+dataid);
+	    fetch(this.url+`/search/${dataid}`, {
+		method: "GET", 
+		mode: "cors",
+		cache: "no-cache",
+		credentials: "same-origin",
+		headers: {
+		    "Content-Type": "application/json",
+		},
+	    })
+		.then(response => response.json()) // response.json creates another promise
+		.then(response => {
+		    //console.log(response);
+		    let range = document.createRange();
+		    range.setStartBefore(annotels[i]);
+		    range.setEndAfter(annotels[i]);
+		    window.Annotesto.annotations.push(
+			new Annotation(
+			    range,
+			    dataid,
+			    annotels[i],
+			    response['tags']
+			)
+		    );
+		});
+	}
+    }
+
+    fetchDocAnnotation(doc_id) {
+	return fetch(this.url+`/docannotation/${doc_id}`, {
+            method: "GET", 
+            mode: "cors",
+            credentials: "same-origin",
+            headers: {
+		"Content-Type": "application/json",
+            },
+	})
+	    .then(response => response.json())
+    }
+    
+    updateAnnotation(annotation) {
+	return fetch(this.url+'/update', {
+            method: "POST", 
+            mode: "cors",
+            credentials: "same-origin",
+            headers: {
+		"Content-Type": "application/json",
+            },
+            body: JSON.stringify(annotation),
+	})
+	    .then(response => response.json())
+	    .then(response => console.log(response));
+    }
+    
+    deleteAnnotation(annotation) {
+	return fetch(this.url+'/delete', {
+            method: "DELETE", 
+            mode: "cors",
+            credentials: "same-origin",
+            headers: {
+		"Content-Type": "application/json",
+            },
+            body: JSON.stringify(annotation),
+	})
+	    .then(response => response.json())
+	    .then(response => console.log(response));
     }
 }
 
@@ -160,7 +285,7 @@ function fitSelection(range,fitDomElement) {
     return true;
 }
 
-function createLegend() {
+function createLegend(startcolor) {
     let legend = document.createElement('div');
     let tags = Object(null);
     legend.id = 'annot8legend';
@@ -173,7 +298,7 @@ function createLegend() {
     legend.appendChild(title);
     let table = document.createElement('table');
     legend.appendChild(table);
-    let randomColorPicker = randomColorSelector();
+    let randomColorPicker = randomColorSelector(startcolor);
     
     function createRow(tag,color,colorText) {
 	if (tag in tags) return tags[tag];
@@ -196,13 +321,13 @@ function createLegend() {
     return createRow;
 }
 
-function randomColorSelector() {
+function randomColorSelector(startcolor) {
     /* References:
        https://martin.ankerl.com/2009/12/09/how-to-create-random-colors-programmatically/
        https://stackoverflow.com/questions/17242144/javascript-convert-hsb-hsv-color-to-rgb-accurately
      */
     let golden_ratio_conjugate = 0.618033988749895;
-    let h = Math.random()
+    let h = startcolor ? startcolor:Math.random()
     function pickColor() {
 	h += golden_ratio_conjugate;
 	h %= 1;

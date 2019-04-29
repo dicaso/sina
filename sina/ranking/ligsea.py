@@ -627,15 +627,22 @@ class AnnotaterServer(object):
             host (str): host ip
         """
         from flask import Flask, request, render_template
+        from collections import OrderedDict
         self.app = Flask('sina') #needs to be package name, where templates/static folder can be found!
         self.host = host
         self.sentences = sentences
+        self.annotations = OrderedDict()
 
     def run(self, debug=False):
         from flask import Flask, request, render_template, jsonify
         @self.app.route('/<int:sent_id>')
         def index(sent_id=0):
-            return render_template('index.html',sentence=self.sentences[sent_id])
+            return render_template(
+                'index.html',
+                sentence=self.sentences[sent_id],
+                prevSent=sent_id-1,
+                nextSent=sent_id+1 if sent_id+1<len(self.sentences) else None
+            )
 
         @self.app.route('/api/annotations',methods=['GET','POST'])
         def api():
@@ -643,14 +650,34 @@ class AnnotaterServer(object):
             # POST data looks like
             #{'quote': 'there', 'ranges': [{'start': '', 'startOffset': 53, 'end': '', 'endOffset': 58}], 'text': '', 'tags': ['first']}
             if request.json:
+                self.annotations[request.json['id']] = request.json
                 return jsonify({'id': 0})
 
-        @self.app.route('/api/search',methods=['GET'])
-        def search():
+        @self.app.route('/api/update',methods=['POST'])
+        def update_annotation():
+            self.app.logger.debug(request.json)
+            if request.json:
+                return jsonify({'id': 0})
+
+        @self.app.route('/api/delete',methods=['DELETE'])
+        def remove_annotation():
+            self.app.logger.debug(request.json)
+            if request.json:
+                return jsonify({'removed_id': request.json['id']})
+
+        @self.app.route('/api/search/<int:annot_id>',methods=['GET'])
+        def search(annot_id):
             self.app.logger.debug(request.form)
             return jsonify(
-                {'quote': 'sent', 'ranges': [{'start': '/div[1]/div[2]', 'startOffset': 10, 'end': '/div[1]/div[2]', 'endOffset': 14}], 'text': '', 'tags': ['first']}
+                {'id':annot_id, 'tags':['first','second']}
             )
-            
+
+        @self.app.route('/api/docannotation/<int:doc_id>',methods=['GET'])
+        def get_docannot(doc_id):
+            self.app.logger.debug(request.form)
+            return jsonify(
+                {'id':doc_id, 'doc_tags':'+++'}
+            )
+        
         self.app.run(host=self.host, debug=debug)
 

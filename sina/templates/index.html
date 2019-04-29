@@ -18,6 +18,14 @@
       <div id="sina-sentence">
 	{{ sentence | safe }}
       </div>
+      <div id="sina-nav">
+	{% if prevSent>=0 %}
+	<a href="{{ prevSent }}">Previous document</a><br />
+	{% endif %}
+	{% if nextSent %}
+	<a href="{{ nextSent }}">Next document</a><br />
+	{% endif %}
+      </div>
       <div class="footer">
 	<br />
 	sina project - Christophe Van Neste
