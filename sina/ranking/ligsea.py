@@ -7,6 +7,7 @@ a keyphrase noun chunk.
 """
 import re, pandas as pd, numpy as np
 from sina.documents import PubmedCollection
+from collections import OrderedDict
 
 class Ligsea(object):
     """Ligsea class that instaniates a literature
@@ -627,7 +628,6 @@ class AnnotaterServer(object):
             host (str): host ip
         """
         from flask import Flask, request, render_template
-        from collections import OrderedDict
         self.app = Flask('sina') #needs to be package name, where templates/static folder can be found!
         self.host = host
         self.sentences = sentences
@@ -637,9 +637,16 @@ class AnnotaterServer(object):
         from flask import Flask, request, render_template, jsonify
         @self.app.route('/<int:sent_id>')
         def index(sent_id=0):
+            if sent_id in self.annotations:
+                html_sentence = applyAnnotations(
+                    self.sentences[sent_id],
+                    self.annotations[sent_id]
+                )
+            else: html_sentence = self.sentences[sent_id]
             return render_template(
                 'index.html',
-                sentence=self.sentences[sent_id],
+                sentence=html_sentence,
+                docid=sent_id,
                 prevSent=sent_id-1,
                 nextSent=sent_id+1 if sent_id+1<len(self.sentences) else None
             )
@@ -650,8 +657,16 @@ class AnnotaterServer(object):
             # POST data looks like
             #{'quote': 'there', 'ranges': [{'start': '', 'startOffset': 53, 'end': '', 'endOffset': 58}], 'text': '', 'tags': ['first']}
             if request.json:
-                self.annotations[request.json['id']] = request.json
-                return jsonify({'id': 0})
+                data = request.json
+                docid = int(data['parent_id']) if 'parent_id' in data else int(data['id'])
+                if not docid in self.annotations:
+                    self.annotations[docid] = ['',OrderedDict()]
+                if data['type'] == 'segment_annotation':
+                    self.annotations[docid][1][data['id']] = data
+                elif data['type'] == 'doc_annotation':
+                    self.annotations[docid][0] = data['doc_annotations']
+                    
+                return jsonify({'id': data['id']})
 
         @self.app.route('/api/update',methods=['POST'])
         def update_annotation():
@@ -662,22 +677,51 @@ class AnnotaterServer(object):
         @self.app.route('/api/delete',methods=['DELETE'])
         def remove_annotation():
             self.app.logger.debug(request.json)
+            #TODO
             if request.json:
                 return jsonify({'removed_id': request.json['id']})
 
-        @self.app.route('/api/search/<int:annot_id>',methods=['GET'])
-        def search(annot_id):
+        @self.app.route('/api/search/<int:doc_id>/<int:annot_id>',methods=['GET'])
+        def search(doc_id,annot_id):
             self.app.logger.debug(request.form)
             return jsonify(
-                {'id':annot_id, 'tags':['first','second']}
+                {
+                'id':annot_id,
+                'tags':[self.annotations[doc_id][1][annot_id]['tag_annotations']] #TODO tags not a list
+                }
             )
 
         @self.app.route('/api/docannotation/<int:doc_id>',methods=['GET'])
         def get_docannot(doc_id):
             self.app.logger.debug(request.form)
             return jsonify(
-                {'id':doc_id, 'doc_tags':'+++'}
+                {
+                    'id':doc_id,
+                    'doc_tags': self.annotations[doc_id][0]
+                    if doc_id in self.annotations else ''
+                }
             )
+
         
         self.app.run(host=self.host, debug=debug)
 
+def applyAnnotations(sent,annots):
+    replacements = []
+    for annot_id,annot in annots[1].items():
+        startPos = -1
+        for i in range(annot['precedingMatches']+1):
+            startPos = sent.index(annot['label'],startPos+1)
+        replacements.append((startPos,startPos+len(annot['label']),annot))
+    # Sort so that downstream replacements can be handled first
+    replacements.sort(key=lambda x: x[0],reverse=True)
+    prevSentDifference = 0 # to deal with overlapping annotations
+    for i, rplcmnt in enumerate(replacements):
+        #TODO overlapping annotations are not handled correctly yet
+        prevSent = sent
+        sent = '{}<annot-8 class="annotator-hl" data-id="{}">{}</annot-8>{}'.format(
+            sent[:rplcmnt[0]],
+            rplcmnt[2]['id'],
+            sent[rplcmnt[0]:rplcmnt[1]],
+            sent[rplcmnt[1]:]
+        )
+    return sent

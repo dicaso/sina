@@ -24,8 +24,18 @@
 	window.Annotesto.pristineText = annotContainer.innerText;
 	window.Annotesto.pristineHTML = annotContainer.innerHTML.split(AnnotElementRe).join('');
 	window.Annotesto.annotContainer = annotContainer;
+
+	// Legend and storage options
 	window.Annotesto.legend = legend ? createLegend(startColor):false;
 	window.Annotesto.storage = storageUrl ? new Storage(storageUrl):false;
+
+	// Initialise annotation documents
+	window.Annotesto.doc = new ADoc(
+	    annotContainer.getAttribute('data-adoc-id'),
+	    annotContainer
+	);
+
+	// Even initialisation
 	eventRegion.addEventListener("mouseup",()=>{
             let selection = window.getSelection();
 	    if (selection.isCollapsed) return;
@@ -34,6 +44,7 @@
 		let annotation = new Annotation(
 		    range,
 		    annotationsMade++,
+		    window.Annotesto.doc,
 		    new AnnotElement()
 		);
 		annotation.tag();
@@ -46,8 +57,8 @@
 		}
 	    }
 	});
-	// Initialise annotation documents
-	window.Annotesto.doc = new ADoc(0,annotContainer);
+
+	// Finished init
 	console.log("Annotator Initialised");
     }
     
@@ -91,12 +102,13 @@ class ADoc { // Annotation document - could be one per page or more
 }
 
 class Annotation {
-    constructor(range,id,annotElement,init_tags) {
+    constructor(range,id,annotParentDoc,annotElement,init_tags) {
 	this.type = 'segment_annotation';
 	this.origin = document.baseURI;
 	this.originalRange = range.cloneRange();
 	this.label = range.toString();
 	this.id = id;
+	this.parent_id = annotParentDoc.id;
 	this.previousTextMatches();
 	this.annotElement = annotElement; //document.createElement('span');
 	if (!init_tags) { // First time annotation
@@ -198,10 +210,14 @@ class Storage{
 
     fetchAnnotations(){
 	let annotels = document.getElementsByTagName(window.Annotesto.config.annotElementTag);
+	// TODO first loop over annotation documents
+	let docid = window.Annotesto
+	    .annotContainer
+	    .getAttribute('data-adoc-id'); //window.Annotesto.doc.id;
 	for (let i=0; i<annotels.length; i++) {
 	    let dataid = annotels[i].getAttribute('data-id')
 	    console.log('Retrieving annotation '+dataid);
-	    fetch(this.url+`/search/${dataid}`, {
+	    fetch(this.url+`/search/${docid}/${dataid}`, {
 		method: "GET", 
 		mode: "cors",
 		cache: "no-cache",
@@ -220,6 +236,7 @@ class Storage{
 			new Annotation(
 			    range,
 			    dataid,
+			    window.Annotesto.doc,//TODO In the future get out of response parent_id
 			    annotels[i],
 			    response['tags']
 			)
