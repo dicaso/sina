@@ -19,7 +19,7 @@
 	let AnnotElementRe = new RegExp('<\/?'+annotElementTag+'.*?>', 'g');
 	let eventRegion = eventContainer ?
 	    document.getElementById(eventContainer):body;
-	let annotationsMade = 0;
+	window.Annotesto.annotationsMade = 0;
 	window.Annotesto.config = Object(null);
 	window.Annotesto.config.annotElementTag = annotElementTag;
 	window.Annotesto.pristineText = annotContainer.innerText;
@@ -44,14 +44,19 @@
 	    if (fitSelection(range, annotContainer)){
 		let annotation = new Annotation(
 		    range,
-		    annotationsMade++,
+		    window.Annotesto.annotationsMade++,
 		    window.Annotesto.doc,
 		    new AnnotElement()
 		);
 		annotation.tag();
 		range.collapse();
 		if (annotation.tag_annotations) {
-		    annotation.spanSelection();
+		    try {annotation.spanSelection();}
+		    catch (error) {
+			if (window.Annotesto.storage)
+			    window.Annotesto.storage.deleteAnnotation(annotation);
+			console.log('Partially overlapping annotations not implemented!');
+		    }
 		    window.Annotesto.annotations.push(
 			annotation
 		    );
@@ -190,8 +195,8 @@ class Annotation {
 class Storage{
     constructor(url,loadLegendTags) {
 	this.url= url.replace(/\/$/,"")+'/api';
-	this.fetchAnnotations();
 	if (loadLegendTags) this.fetchTags();
+	this.fetchAnnotations();
     }
 
     sendAnnotation(annotation) {
@@ -217,7 +222,11 @@ class Storage{
 	    .annotContainer
 	    .getAttribute('data-adoc-id'); //window.Annotesto.doc.id;
 	for (let i=0; i<annotels.length; i++) {
-	    let dataid = annotels[i].getAttribute('data-id')
+	    let dataid = Number(annotels[i].getAttribute('data-id'));
+	    window.Annotesto.annotationsMade = Math.max(
+		window.Annotesto.annotationsMade,
+		dataid+1
+	    );
 	    console.log('Retrieving annotation '+dataid);
 	    fetch(this.url+`/search/${docid}/${dataid}`, {
 		method: "GET", 

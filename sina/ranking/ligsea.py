@@ -204,7 +204,7 @@ class Ligsea(object):
     def get_gene_aliases(self,gene_symbol):
         return list(self.gene_dict[self.gene_dict.symbol == gene_symbol].alias)        
 
-    def evaluate_gene_associations(self,infer=False,store=True,revaluate=False):
+    def evaluate_gene_associations(self,infer=False,store=True,revaluate=False,server=False):
         """Curate gene associations made by indicating
         if they are relevant or not
 
@@ -216,70 +216,112 @@ class Ligsea(object):
               have to be provided anymore (TODO work in progress)
             store (bool): Annotations are stored in corpus directory
             revaluate (bool): Previous annotations are not retrieved
+            server (bool | str): Evaluate through browser, instead of commandline.
+              If str is provided is passed on to server function as address, e.g. '0.0.0.0'
         """
-        from plumbum import colors
         import shelve, hashlib, os
-        print(
-            colors.red | (
-                'Type "?" to see the abstract, "!" to skip gene alias and "!!" to skip entire gene,\n'+
-                '"+" if strong positive association, "+-" if weak positive association,\n'+
-                '"-" for strong negative association, "-+" if weak negative association,\n'+
-                '"x" for unclear association, anything else if invalid association.'
-            )
-        )
-        print(len(self.gene_association),'to evaluate.')
-        with shelve.open(os.path.join(os.path.expanduser(self.corpus_location),'.annotations.shelve')) as stored_annots:
-            for geni,gene in enumerate(self.gene_association):
-                print(colors.green | 'Reviewing gene "%s" (%s)[%s]:' % (gene,', '.join(self.get_gene_aliases(gene)),geni))
-                print(len(self.gene_association[gene]),'associated abstracts.')
-                skipGene = False
-                skipAliases = set()
-                for assoc in self.gene_association[gene]:
-                    for sent_assoc in self.gene_association[gene][assoc]:
-                        sent_store_key = str((
-                            hashlib.md5(self.gene_association_sents[sent_assoc['sent']].text.encode()).hexdigest(),
-                            gene, assoc[2], assoc[3] # gene alias and regex match positions
-                        ))
-                        if not revaluate and sent_store_key in stored_annots:
-                            sent_assoc['valid_annot'] = stored_annots[sent_store_key]
-                            continue
-                        if skipGene or assoc[2] in skipAliases:
-                            sent_assoc['valid_annot'] = False
-                        else:
-                            s = self.gene_association_sents[sent_assoc['sent']]
-                            print(
-                                s.text.replace(
-                                    s.text[assoc[3][0]:assoc[3][1]],colors.red | s.text[assoc[3][0]:assoc[3][1]]
-                                ).replace(
-                                    assoc[2], colors.green | assoc[2]
-                                )
-                            )
-                            feedback = input()
-                            if feedback == '?':
-                                print('abstract')
-                                feedback = input()
-                            elif feedback == '!': skipAliases.add(assoc[2])
-                            elif feedback == '!!': skipGene = True
-                            sent_assoc['valid_annot'] = feedback if feedback in ('+', '+-', '-', '-+', 'x') else False
-                        if store: stored_annots[sent_store_key] = sent_assoc['valid_annot']
-        self.curated_gene_associations = [
-            (gene,assoc,sent_assoc)
-            for gene in self.gene_association
-            for assoc in self.gene_association[gene]
-            for sent_assoc in self.gene_association[gene][assoc]
-            if sent_assoc['valid_annot']
-        ]
-        # Sort according to oldest to newest date
-        self.curated_gene_associations.sort(key=lambda x: x[1][1])
-        self.curated_gene_associations = pd.DataFrame({
-            'gene':[c[0] for c in self.curated_gene_associations],
-            'date':[c[1][1] for c in self.curated_gene_associations],
-            'pmid':[c[1][0] for c in self.curated_gene_associations],
-            'sent':[c[2]['sent'] for c in self.curated_gene_associations],
-            'featurevec':[c[2] for c in self.curated_gene_associations],
-            'annot': [c[2]['valid_annot'] for c in self.curated_gene_associations]
-        })
 
+        # Web ui
+        if server:
+            import itertools as it
+            c1,c2 = it.count(),it.count()
+            anse = AnnotaterServer(
+                sentences = [
+                    self.gene_association_sents[sent_assoc['sent']].text
+                    for gene in self.gene_association
+                    for assoc in self.gene_association[gene]
+                    for sent_assoc in self.gene_association[gene][assoc]
+                ],
+                annotations = [
+                    ['',{
+                        0: {
+                            'label': assoc[2],
+                            'id': 0,
+                            'parent_id': next(c1),
+                            'tag_annotations': 'gene'
+                            },
+                        1: {
+                            'label': self.gene_association_sents[
+                                sent_assoc['sent']
+                                ].text[assoc[3][0]:assoc[3][1]],
+                            'id': 1,
+                            'parent_id': next(c2),
+                            'tag_annotations': self.assoc.pattern
+                            }
+                    }]
+                    for gene in self.gene_association
+                    for assoc in self.gene_association[gene]
+                    for sent_assoc in self.gene_association[gene][assoc]
+                ],
+                tags = ['gene',self.assoc.pattern,'relation'],
+                host = server if isinstance(server,str) else '127.0.0.1'
+            )
+            anse.run()
+
+        # CLI
+        else:
+            from plumbum import colors
+            print(
+                colors.red | (
+                    'Type "?" to see the abstract, "!" to skip gene alias and "!!" to skip entire gene,\n'+
+                    '"+" if strong positive association, "+-" if weak positive association,\n'+
+                    '"-" for strong negative association, "-+" if weak negative association,\n'+
+                    '"x" for unclear association, anything else if invalid association.'
+                )
+            )
+            print(len(self.gene_association),'to evaluate.')
+            with shelve.open(os.path.join(os.path.expanduser(self.corpus_location),'.annotations.shelve')) as stored_annots:
+                for geni,gene in enumerate(self.gene_association):
+                    print(colors.green | 'Reviewing gene "%s" (%s)[%s]:' % (gene,', '.join(self.get_gene_aliases(gene)),geni))
+                    print(len(self.gene_association[gene]),'associated abstracts.')
+                    skipGene = False
+                    skipAliases = set()
+                    for assoc in self.gene_association[gene]:
+                        for sent_assoc in self.gene_association[gene][assoc]:
+                            sent_store_key = str((
+                                hashlib.md5(self.gene_association_sents[sent_assoc['sent']].text.encode()).hexdigest(),
+                                gene, assoc[2], assoc[3] # gene alias and regex match positions
+                            ))
+                            if not revaluate and sent_store_key in stored_annots:
+                                sent_assoc['valid_annot'] = stored_annots[sent_store_key]
+                                continue
+                            if skipGene or assoc[2] in skipAliases:
+                                sent_assoc['valid_annot'] = False
+                            else:
+                                s = self.gene_association_sents[sent_assoc['sent']]
+                                print(
+                                    s.text.replace(
+                                        s.text[assoc[3][0]:assoc[3][1]],colors.red | s.text[assoc[3][0]:assoc[3][1]]
+                                    ).replace(
+                                        assoc[2], colors.green | assoc[2]
+                                    )
+                                )
+                                feedback = input()
+                                if feedback == '?':
+                                    print('abstract')
+                                    feedback = input()
+                                elif feedback == '!': skipAliases.add(assoc[2])
+                                elif feedback == '!!': skipGene = True
+                                sent_assoc['valid_annot'] = feedback if feedback in ('+', '+-', '-', '-+', 'x') else False
+                            if store: stored_annots[sent_store_key] = sent_assoc['valid_annot']
+            self.curated_gene_associations = [
+                (gene,assoc,sent_assoc)
+                for gene in self.gene_association
+                for assoc in self.gene_association[gene]
+                for sent_assoc in self.gene_association[gene][assoc]
+                if sent_assoc['valid_annot']
+            ]
+            # Sort according to oldest to newest date
+            self.curated_gene_associations.sort(key=lambda x: x[1][1])
+            self.curated_gene_associations = pd.DataFrame({
+                'gene':[c[0] for c in self.curated_gene_associations],
+                'date':[c[1][1] for c in self.curated_gene_associations],
+                'pmid':[c[1][0] for c in self.curated_gene_associations],
+                'sent':[c[2]['sent'] for c in self.curated_gene_associations],
+                'featurevec':[c[2] for c in self.curated_gene_associations],
+                'annot': [c[2]['valid_annot'] for c in self.curated_gene_associations]
+            })
+    
     def train_gene_evaluations(self, test_size=0.25, random_state=1000):
         """Based on evaluations already provided
         build an nlp model to either evaluate associations
@@ -614,7 +656,7 @@ class Ligsea(object):
         self.geos = geos
 
 class AnnotaterServer(object):
-    def __init__(self, sentences, annotations=None, host='127.0.0.1'):
+    def __init__(self, sentences, annotations=None, tags=[], host='127.0.0.1'):
         """Annotation server
 
         References:
@@ -625,6 +667,8 @@ class AnnotaterServer(object):
         
         Args:
             sentences (list): list of sentence strings to annotate
+            annotations (list): list of annotations for every sentence
+            tags (list): list of tags that will be preloaded in ui legend
             host (str): host ip
         """
         from flask import Flask, request, render_template
@@ -632,6 +676,7 @@ class AnnotaterServer(object):
         self.host = host
         self.sentences = sentences
         self.annotations = annotations if annotations else OrderedDict()
+        self.tags = tags
 
     def run(self, debug=False):
         from flask import Flask, request, render_template, jsonify
@@ -679,9 +724,11 @@ class AnnotaterServer(object):
         @self.app.route('/api/delete',methods=['DELETE'])
         def remove_annotation():
             self.app.logger.debug(request.json)
-            #TODO
             if request.json:
-                return jsonify({'removed_id': request.json['id']})
+                data = request.json
+                docid = int(data['parent_id'])
+                self.annotations[docid][1].pop(data['id'])
+                return jsonify({'removed_id': data['id']})
 
         @self.app.route('/api/search/<int:doc_id>/<int:annot_id>',methods=['GET'])
         def search(doc_id,annot_id):
@@ -707,6 +754,7 @@ class AnnotaterServer(object):
         @self.app.route('/api/tags',methods=['GET'])
         def get_tags():
             return jsonify(
+                self.tags if self.tags else
                 sorted({
                     self.annotations[d][1][a]['tag_annotations'] for d in self.annotations for a in self.annotations[d][1]
                 })
@@ -730,14 +778,17 @@ def applyAnnotations(sent,annots):
         replacements.append((startPos,startPos+len(annot['label']),annot))
     # Sort so that downstream replacements can be handled first
     replacements.sort(key=lambda x: x[0],reverse=True)
-    prevSentDifference = 0 # to deal with overlapping annotations
-    for i, rplcmnt in enumerate(replacements):
-        #TODO overlapping annotations are not handled correctly yet
+    prevSentDifferences = [] # to deal with overlapping annotations
+    for i, (startPos,endPos,rplcmnt) in enumerate(replacements):
         prevSent = sent
+        endPos += sum([ld for sp,ld in prevSentDifferences if endPos>sp])
+        # if current endPos is bigger than a previous applied startPos it should be encompassing
+        # that previous annotation
         sent = '{}<annot-8 class="annotator-hl" data-id="{}">{}</annot-8>{}'.format(
-            sent[:rplcmnt[0]],
-            rplcmnt[2]['id'],
-            sent[rplcmnt[0]:rplcmnt[1]],
-            sent[rplcmnt[1]:]
+            sent[:startPos],
+            rplcmnt['id'],
+            sent[startPos:endPos],
+            sent[endPos:]
         )
+        prevSentDifferences.append((startPos,len(sent)-len(prevSent)))
     return sent
