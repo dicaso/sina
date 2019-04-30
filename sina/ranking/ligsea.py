@@ -238,7 +238,8 @@ class Ligsea(object):
                             'label': assoc[2],
                             'id': 0,
                             'parent_id': next(c1),
-                            'tag_annotations': 'gene'
+                            'tag_annotations': 'gene',
+                            'precedingMatches': 0 #TODO could be different
                             },
                         1: {
                             'label': self.gene_association_sents[
@@ -246,7 +247,8 @@ class Ligsea(object):
                                 ].text[assoc[3][0]:assoc[3][1]],
                             'id': 1,
                             'parent_id': next(c2),
-                            'tag_annotations': self.assoc.pattern
+                            'tag_annotations': self.assoc.pattern,
+                            'precedingMatches': 0
                             }
                     }]
                     for gene in self.gene_association
