@@ -225,7 +225,7 @@ class Ligsea(object):
         if server:
             import itertools as it
             c1,c2 = it.count(),it.count()
-            anse = AnnotaterServer(
+            self.anse = AnnotaterServer(
                 sentences = [
                     self.gene_association_sents[sent_assoc['sent']].text
                     for gene in self.gene_association
@@ -256,7 +256,7 @@ class Ligsea(object):
                 tags = ['gene',self.assoc.pattern,'relation'],
                 host = server if isinstance(server,str) else '127.0.0.1'
             )
-            anse.run()
+            self.anse.run()
 
         # CLI
         else:
