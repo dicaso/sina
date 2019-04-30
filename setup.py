@@ -27,7 +27,8 @@ setup(name = 'sina',
       package_data = {
           'sina': [
               'templates/index.html',
-              'static/js/main.js'
+              'static/js/main.js',
+              'static/js/annotesto.js'
           ]
       },
       include_package_data = True,
