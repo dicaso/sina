@@ -224,7 +224,7 @@ class Ligsea(object):
         # Web ui
         if server:
             import itertools as it
-            c1,c2 = it.count(),it.count()
+            c1,c2,d = it.count(),it.count(),it.count()
             self.anse = AnnotaterServer(
                 sentences = [
                     self.gene_association_sents[sent_assoc['sent']].text
@@ -232,7 +232,7 @@ class Ligsea(object):
                     for assoc in self.gene_association[gene]
                     for sent_assoc in self.gene_association[gene][assoc]
                 ],
-                annotations = [
+                annotations = {next(d):
                     ['',{
                         0: {
                             'label': assoc[2],
@@ -254,7 +254,7 @@ class Ligsea(object):
                     for gene in self.gene_association
                     for assoc in self.gene_association[gene]
                     for sent_assoc in self.gene_association[gene][assoc]
-                ],
+                },
                 tags = ['gene',self.assoc.pattern,'relation'],
                 host = server if isinstance(server,str) else '127.0.0.1'
             )
