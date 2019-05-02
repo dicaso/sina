@@ -14,18 +14,25 @@
     <div class="container">
       <div class="jumbotron">
 	<h2>Sina Annotator</h2>
+	<div id="sina-nav">
+	  {% if prevSent>=0 %}
+	  <a href="{{ prevSent }}">Previous document</a><br />
+	  {% endif %}
+	  {% if nextSent %}
+	  <a href="{{ nextSent }}">Next document</a><br />
+	  {% endif %}
+	</div>
       </div>
-      <div id="sina-sentence" data-adoc-id="{{ docid }}">
-	{{ sentence | safe }}
-      </div>
-      <div id="sina-nav">
-	{% if prevSent>=0 %}
-	<a href="{{ prevSent }}">Previous document</a><br />
-	{% endif %}
-	{% if nextSent %}
-	<a href="{{ nextSent }}">Next document</a><br />
-	{% endif %}
-      </div>
+
+      {# There should not be any whitespace between sentence and
+      container html element #}
+      {% if groupedSentences %}
+      {% for sent in sentence %}
+      <div class="sina-sentence" data-adoc-id="{{ loop.index-1 }}" data-adoc-gid="{{ docid }}">{{ sent | safe }}</div>
+      {% endfor %}
+      {% else %}
+      <div id="sina-sentence" data-adoc-id="{{ docid }}">{{ sentence | safe }}</div>
+      {% endif %}
       <div class="footer">
 	<br />
 	sina project - Christophe Van Neste - <a href="/quit">Stop the

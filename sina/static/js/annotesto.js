@@ -3,8 +3,9 @@
     
     const _init = (
 	{
+	    // Annotesto configuration settings
 	    storageUrl = 'http://127.0.0.1:5000',
-	    container = '',
+	    container = '', // id name if single container, class name for multiple
 	    eventContainer = '',
 	    annotElementTag = 'annot-8',
 	    legend = true,
@@ -15,48 +16,60 @@
 	let body = document.getElementsByTagName("body")[0];
 	let annotContainer = container ?
 	    document.getElementById(container):body;
+	let annotContainers = null;
+	if (!annotContainer) // if null should be described by class
+	    annotContainers = document.getElementsByClassName(container);
 	let AnnotElement = document.registerElement(annotElementTag);
 	let AnnotElementRe = new RegExp('<\/?'+annotElementTag+'.*?>', 'g');
 	let eventRegion = eventContainer ?
 	    document.getElementById(eventContainer):body;
+	window.Annotesto.singleDoc = Boolean(annotContainer);
 	window.Annotesto.annotationsMade = 0;
 	window.Annotesto.config = Object(null);
 	window.Annotesto.config.annotElementTag = annotElementTag;
-	window.Annotesto.pristineText = annotContainer.innerText;
-	window.Annotesto.pristineHTML = annotContainer.innerHTML.split(AnnotElementRe).join('');
-	window.Annotesto.annotContainer = annotContainer;
+	/*window.Annotesto.pristineText = annotContainer.innerText;
+	window.Annotesto.pristineHTML = annotContainer.innerHTML.split(AnnotElementRe).join('');*/
+	if (annotContainer) window.Annotesto.annotContainer = annotContainer;
+	else window.Annotesto.annotContainers = annotContainers;
 
 	// Legend and storage options
 	window.Annotesto.legend = legend ? createLegend(startColor):false;
 	window.Annotesto.storage = storageUrl ? new Storage(storageUrl,preloadTags):false;
 
 	// Initialise annotation documents
-	window.Annotesto.doc = new ADoc(
+	if (annotContainer) window.Annotesto.doc = new ADoc(
 	    annotContainer.getAttribute('data-adoc-id'),
 	    annotContainer
 	);
-
-	// Even initialisation
+	else {
+	    window.Annotesto.docs = [];
+	    for (let i=0; i<annotContainers.length; i++)
+		window.Annotesto.docs.push(
+		    new ADoc(
+			annotContainers[i].getAttribute('data-adoc-id'),
+			annotContainers[i]
+		    )
+		);
+	}
+	
+	// Event initialisation
 	eventRegion.addEventListener("mouseup",()=>{
             let selection = window.getSelection();
 	    if (selection.isCollapsed) return;
 	    let range = selection.getRangeAt(0);
-	    if (fitSelection(range, annotContainer)){
+	    let fitDomElement = null;
+	    if (fitDomElement = fitSelection(range, annotContainer)){
+		
 		let annotation = new Annotation(
 		    range,
 		    window.Annotesto.annotationsMade++,
-		    window.Annotesto.doc,
+		    window.Annotesto.singleDoc ?
+			window.Annotesto.doc:
+			window.Annotesto.docs[Number(fitDomElement.getAttribute('data-adoc-id'))],
 		    new AnnotElement()
 		);
-		annotation.tag();
 		range.collapse();
 		if (annotation.tag_annotations) {
-		    try {annotation.spanSelection();}
-		    catch (error) {
-			if (window.Annotesto.storage)
-			    window.Annotesto.storage.deleteAnnotation(annotation);
-			console.log('Partially overlapping annotations not implemented!');
-		    }
 		    window.Annotesto.annotations.push(
 			annotation
 		    );
@@ -79,14 +92,15 @@ class ADoc { // Annotation document - could be one per page or more
     constructor(id,adocElement,init_tags) { //adocElement -> will put a button before
 	this.type = 'doc_annotation';
 	this.origin = document.baseURI;
-	this.id = id;
+	this.id = Number(id);
+	this.parent_gid = Number(adocElement.getAttribute('data-adoc-gid'));
 	this.adocElement = adocElement;
 	this.doc_annotations = init_tags?init_tags:'';
 	this.createButton();
 	
 	// If connected storage retrieve document annotation
 	if (window.Annotesto.storage)
-	    window.Annotesto.storage.fetchDocAnnotation(this.id)
+	    window.Annotesto.storage.fetchDocAnnotation(this.id,this.parent_gid)
 	    .then(response => this.button.innerText = response['doc_tags']);
     }
 
@@ -115,14 +129,25 @@ class Annotation {
 	this.label = range.toString();
 	this.id = id;
 	this.parent_id = annotParentDoc.id;
+	// Parent id needs to match with 0-indexed ADoc location
+	if (window.Annotesto.annotContainers)
+	    this.parent_gid = annotParentDoc.parent_gid;
 	this.previousTextMatches();
 	this.annotElement = annotElement; //document.createElement('span');
 	if (!init_tags) { // First time annotation
 	    this.annotElement.setAttribute('data-id', id);
 	    this.annotElement.className = 'annot-8hl';
+	    this.tag()
+	    try {if (this.tag_annotations) this.spanSelection();}
+	    catch (error) {
+		if (window.Annotesto.storage)
+		    window.Annotesto.storage.deleteAnnotation(this);
+		console.log('Partially overlapping annotations not implemented!');
+	    }
+
 	} else { // Previously annotated tags have been provided
 	    this.tag_annotations = init_tags.join(', ');
-	    this.annotElement.className = 'annot-8hl,annot-prev';
+	    this.annotElement.className = 'annot-8hl annot-prev';
 	    this.annotElement.style.backgroundColor = window.Annotesto.legend ?
 		window.Annotesto.legend(this.tag_annotations):'rgba(255,255,0,0.3)';
 	    this.prevContent = document.createDocumentFragment();
@@ -155,7 +180,7 @@ class Annotation {
 	    else if (window.Annotesto.storage) window.Annotesto.storage.sendAnnotation(this)
 		.then(data => console.log(JSON.stringify(data)))
 		.catch(error => console.error(error));
-	} else this.deleteAnnotation();
+	} else if (wasTagged) this.deleteAnnotation();
     }
 
     spanSelection() {
@@ -181,7 +206,11 @@ class Annotation {
 	let count = 0;
 	let before = this.range.cloneRange();
 	before.collapse(true); //move end of range to beginning
-	before.setStart(window.Annotesto.annotContainer,0);
+	before.setStart(
+	    window.Annotesto.annotContainer?
+		window.Annotesto.annotContainer:window.Annotesto.annotContainers[this.parent_id],
+	    0
+	);
 	let beforeText = before.toString()
 	for (let i=0; i=beforeText.indexOf(this.label,i)+1;) {
 	    count++;
@@ -217,18 +246,19 @@ class Storage{
 
     fetchAnnotations(){
 	let annotels = document.getElementsByTagName(window.Annotesto.config.annotElementTag);
-	// TODO first loop over annotation documents
-	let docid = window.Annotesto
-	    .annotContainer
-	    .getAttribute('data-adoc-id'); //window.Annotesto.doc.id;
 	for (let i=0; i<annotels.length; i++) {
+	    let docid = annotels[i].getAttribute('data-docid');
+	    let pageid = annotels[i].getAttribute('data-gid'); // not relevant for singleDoc
 	    let dataid = Number(annotels[i].getAttribute('data-id'));
 	    window.Annotesto.annotationsMade = Math.max(
 		window.Annotesto.annotationsMade,
 		dataid+1
 	    );
 	    console.log('Retrieving annotation '+dataid);
-	    fetch(this.url+`/search/${docid}/${dataid}`, {
+	    let url = window.Annotesto.singleDoc?
+		this.url+`/search/${docid}/${dataid}`:
+		this.url+`/search/${pageid}/${docid}/${dataid}`;
+	    fetch(url, {
 		method: "GET", 
 		mode: "cors",
 		cache: "no-cache",
@@ -247,7 +277,8 @@ class Storage{
 			new Annotation(
 			    range,
 			    dataid,
-			    window.Annotesto.doc,//TODO In the future get out of response parent_id
+			    window.Annotesto.singleDoc?
+				window.Annotesto.doc:window.Annotesto.docs[docid],
 			    annotels[i],
 			    response['tags']
 			)
@@ -256,8 +287,11 @@ class Storage{
 	}
     }
 
-    fetchDocAnnotation(doc_id) {
-	return fetch(this.url+`/docannotation/${doc_id}`, {
+    fetchDocAnnotation(doc_id,page_id) {
+	let url = window.Annotesto.singleDoc?
+	    this.url+`/docannotation/${doc_id}`:
+	    this.url+`/docannotation/${page_id}/${doc_id}`;
+	return fetch(url, {
             method: "GET", 
             mode: "cors",
             credentials: "same-origin",
@@ -312,28 +346,60 @@ class Storage{
 
 // Functions
 function fitSelection(range,fitDomElement) {
-    let fitRange = document.createRange();
-    fitRange.selectNode(fitDomElement)
-    if (
-	// If a selection is made entirely outside of the annotation container, false is returned
-	(fitRange.compareBoundaryPoints(0,range) === 1 && fitRange.compareBoundaryPoints(3,range) === 1) ||
-	(fitRange.compareBoundaryPoints(1,range) === -1 && fitRange.compareBoundaryPoints(2,range) === -1)
-    ) return false;
+    let fitRange = null;
+    if (fitDomElement) { // Only one annotContainer
+	fitRange = document.createRange();
+	fitRange.selectNode(fitDomElement);
+	if (
+	    // If a selection is made entirely outside of the annotation container, false is returned
+	    (fitRange.compareBoundaryPoints(0,range) === 1 && fitRange.compareBoundaryPoints(3,range) === 1) ||
+		(fitRange.compareBoundaryPoints(1,range) === -1 && fitRange.compareBoundaryPoints(2,range) === -1)
+	) return false;
+    } else { // Multiple possibilities, select first that has some overlap
+	let overlapFound = false;
+	for (let i=0; i<window.Annotesto.annotContainers.length; i++) {
+	    fitDomElement = window.Annotesto.annotContainers[i];
+	    fitRange = document.createRange();
+	    fitRange.selectNode(fitDomElement);
+	    if (
+		overlapFound = !((fitRange.compareBoundaryPoints(0,range) === 1 && fitRange.compareBoundaryPoints(3,range) === 1) ||
+				(fitRange.compareBoundaryPoints(1,range) === -1 && fitRange.compareBoundaryPoints(2,range) === -1))
+	    ) break;
+	}
+	if (!overlapFound) return false;
+    }
+    
     // Only if at least start or end point falls within the annotation container, is the selection
     // aligned appropriately to the annotation container
-    if (fitRange.compareBoundaryPoints(0,range) === 1) range.setStartBefore(fitDomElement);
-    if (fitRange.compareBoundaryPoints(2,range) === -1) range.setEndAfter(fitDomElement);
-    return true;
+    if (fitRange.compareBoundaryPoints(0,range) === 1) range.setStart(fitDomElement,0);
+    if (fitRange.compareBoundaryPoints(2,range) === -1) range.setEnd(fitDomElement,fitDomElement.childNodes.length);
+    //setStartBefore setEndAfter => do not work as they mess up the spanning of the new element
+    return fitDomElement;
 }
 
 function createLegend(startcolor) {
     let legend = document.createElement('div');
     let tags = Object(null);
     legend.id = 'annot8legend';
-    window.Annotesto.annotContainer.parentNode.insertBefore(
-	legend,
-	window.Annotesto.annotContainer.nextSibling
-    );
+
+    // Add legend to DOM
+    if (window.Annotesto.annotContainer)
+	window.Annotesto.annotContainer.parentNode.insertBefore(
+	    legend,
+	    window.Annotesto.annotContainer.nextSibling
+	);
+    else {
+	window.Annotesto.annotContainers[0].parentNode.insertBefore(
+	    legend,
+	    window.Annotesto.annotContainers[0]
+	);
+	window.Annotesto.annotContainers[0].parentNode.insertBefore(
+	    document.createElement('br'),
+	    window.Annotesto.annotContainers[0]
+	);
+    }
+
+    // Create legend elements
     let title = document.createElement('h3');
     title.innerText = 'Legend:'
     legend.appendChild(title);

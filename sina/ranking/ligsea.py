@@ -225,7 +225,7 @@ class Ligsea(object):
         if server:
             import itertools as it
             c1,c2,d = it.count(),it.count(),it.count()
-            self.anse = AnnotaterServer(
+            self.anse = AnnotatorServer(
                 sentences = [
                     self.gene_association_sents[sent_assoc['sent']].text
                     for gene in self.gene_association
@@ -657,7 +657,7 @@ class Ligsea(object):
                     if an.text.startswith('G'): geos.append(an.text)
         self.geos = geos
 
-class AnnotaterServer(object):
+class AnnotatorServer(object):
     def __init__(self, sentences, annotations=None, tags=[], host='127.0.0.1'):
         """Annotation server
 
@@ -668,7 +668,8 @@ class AnnotaterServer(object):
             https://www.w3.org/TR/selection-api/
         
         Args:
-            sentences (list): list of sentence strings to annotate
+            sentences (list): list of [list of] sentence strings to annotate
+              If list of list, each list of sentences is presented in the same document
             annotations (list): list of annotations for every sentence
             tags (list): list of tags that will be preloaded in ui legend
             host (str): host ip
@@ -677,6 +678,7 @@ class AnnotaterServer(object):
         self.app = Flask('sina') #needs to be package name, where templates/static folder can be found!
         self.host = host
         self.sentences = sentences
+        self.groupedSentences = not isinstance(sentences[0],str)
         self.annotations = annotations if annotations else OrderedDict()
         self.tags = tags
 
@@ -686,15 +688,23 @@ class AnnotaterServer(object):
         @self.app.route('/')
         @self.app.route('/<int:sent_id>')
         def index(sent_id=0):
-            if sent_id in self.annotations:
-                html_sentence = applyAnnotations(
-                    self.sentences[sent_id],
-                    self.annotations[sent_id]
-                )
-            else: html_sentence = self.sentences[sent_id]
+            if self.groupedSentences: # multiple docs/page
+                html_sentence = [
+                    applyAnnotations(sent,self.annotations[(sent_id,si)])
+                    if (sent_id,si) in self.annotations else sent
+                    for si,sent in enumerate(self.sentences[sent_id])
+                ]
+            else: # single doc/page
+                if sent_id in self.annotations:
+                    html_sentence = applyAnnotations(
+                        self.sentences[sent_id],
+                        self.annotations[sent_id]
+                    )
+                else: html_sentence = self.sentences[sent_id]
             return render_template(
                 'index.html',
                 sentence=html_sentence,
+                groupedSentences=self.groupedSentences,
                 docid=sent_id,
                 prevSent=sent_id-1,
                 nextSent=sent_id+1 if sent_id+1<len(self.sentences) else None
@@ -708,6 +718,8 @@ class AnnotaterServer(object):
             if request.json:
                 data = request.json
                 docid = int(data['parent_id']) if 'parent_id' in data else int(data['id'])
+                if 'parent_gid' in data: # multiple docs/page
+                    docid = (data['parent_gid'],docid)
                 if not docid in self.annotations:
                     self.annotations[docid] = ['',OrderedDict()]
                 if data['type'] == 'segment_annotation':
@@ -729,12 +741,16 @@ class AnnotaterServer(object):
             if request.json:
                 data = request.json
                 docid = int(data['parent_id'])
+                if 'parent_gid' in data: docid = (data['parent_gid'],docid)
                 self.annotations[docid][1].pop(data['id'])
                 return jsonify({'removed_id': data['id']})
 
         @self.app.route('/api/search/<int:doc_id>/<int:annot_id>',methods=['GET'])
-        def search(doc_id,annot_id):
+        @self.app.route('/api/search/<int:page_id>/<int:doc_id>/<int:annot_id>',methods=['GET'])
+        def search(doc_id,annot_id,page_id=None):
             self.app.logger.debug(request.form)
+            if not page_id is None:
+                doc_id = (page_id,doc_id)
             return jsonify(
                 {
                 'id':annot_id,
@@ -743,8 +759,11 @@ class AnnotaterServer(object):
             )
 
         @self.app.route('/api/docannotation/<int:doc_id>',methods=['GET'])
-        def get_docannot(doc_id):
+        @self.app.route('/api/docannotation/<int:page_id>/<int:doc_id>',methods=['GET'])
+        def get_docannot(doc_id,page_id=None):
             self.app.logger.debug(request.form)
+            if not page_id is None:
+                doc_id = (page_id,doc_id)
             return jsonify(
                 {
                     'id':doc_id,
@@ -786,11 +805,22 @@ def applyAnnotations(sent,annots):
         endPos += sum([ld for sp,ld in prevSentDifferences if endPos>sp])
         # if current endPos is bigger than a previous applied startPos it should be encompassing
         # that previous annotation
-        sent = '{}<annot-8 class="annotator-hl" data-id="{}">{}</annot-8>{}'.format(
-            sent[:startPos],
-            rplcmnt['id'],
-            sent[startPos:endPos],
-            sent[endPos:]
-        )
+        if 'parent_gid' in rplcmnt: # multiple docs/page
+            sent = '{}<annot-8 class="annotator-hl" data-id="{}" data-docid="{}" data-gid="{}">{}</annot-8>{}'.format(
+                sent[:startPos],
+                rplcmnt['id'],
+                rplcmnt['parent_id'],
+                rplcmnt['parent_gid'],
+                sent[startPos:endPos],
+                sent[endPos:]
+            )
+        else: #single doc/page
+            sent = '{}<annot-8 class="annotator-hl" data-id="{}" data-docid="{}">{}</annot-8>{}'.format(
+                sent[:startPos],
+                rplcmnt['id'],
+                rplcmnt['parent_id'],
+                sent[startPos:endPos],
+                sent[endPos:]
+            )
         prevSentDifferences.append((startPos,len(sent)-len(prevSent)))
     return sent
