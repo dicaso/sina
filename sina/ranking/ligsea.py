@@ -234,7 +234,7 @@ class Ligsea(object):
                     ]
                     for gene in self.gene_association
                 ],
-                annotations = {next(d):
+                annotations = {(geni,next(d)):
                     ['',{
                         0: {
                             'label': assoc[2],
@@ -253,7 +253,7 @@ class Ligsea(object):
                             'precedingMatches': 0
                             }
                     }]
-                    for gene in self.gene_association
+                    for geni,gene in enumerate(self.gene_association)
                     for assoc in self.gene_association[gene]
                     for sent_assoc in self.gene_association[gene][assoc]
                 },
