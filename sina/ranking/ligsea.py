@@ -227,10 +227,12 @@ class Ligsea(object):
             c1,c2,d = it.count(),it.count(),it.count()
             self.anse = AnnotatorServer(
                 sentences = [
+                    [
                     self.gene_association_sents[sent_assoc['sent']].text
-                    for gene in self.gene_association
                     for assoc in self.gene_association[gene]
                     for sent_assoc in self.gene_association[gene][assoc]
+                    ]
+                    for gene in self.gene_association
                 ],
                 annotations = {next(d):
                     ['',{
