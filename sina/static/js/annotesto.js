@@ -10,7 +10,8 @@
 	    annotElementTag = 'annot-8',
 	    legend = true,
 	    startColor = null, // should be ]0-1] to have same selection of colors
-	    preloadTags = true
+	    preloadTags = true,
+	    doctags = null, // if provided as list will be slider, as map topdown list
 	}
     )=>{
 	let body = document.getElementsByTagName("body")[0];
@@ -27,6 +28,7 @@
 	window.Annotesto.annotationsMade = 0;
 	window.Annotesto.config = Object(null);
 	window.Annotesto.config.annotElementTag = annotElementTag;
+	window.Annotesto.config.doctags = doctags;
 	/*window.Annotesto.pristineText = annotContainer.innerText;
 	window.Annotesto.pristineHTML = annotContainer.innerHTML.split(AnnotElementRe).join('');*/
 	if (annotContainer) window.Annotesto.annotContainer = annotContainer;
@@ -96,12 +98,9 @@ class ADoc { // Annotation document - could be one per page or more
 	this.parent_gid = Number(adocElement.getAttribute('data-adoc-gid'));
 	this.adocElement = adocElement;
 	this.doc_annotations = init_tags?init_tags:'';
-	this.createButton();
-	
-	// If connected storage retrieve document annotation
-	if (window.Annotesto.storage)
-	    window.Annotesto.storage.fetchDocAnnotation(this.id,this.parent_gid)
-	    .then(response => this.button.innerText = response['doc_tags']);
+	if (window.Annotesto.config.doctags)
+	    this.createSlider();
+	else this.createButton();
     }
 
     createButton() {
@@ -112,11 +111,38 @@ class ADoc { // Annotation document - could be one per page or more
 	    this.button,
 	    this.adocElement
 	);
+
+	// If connected storage retrieve document annotation
+	if (window.Annotesto.storage)
+	    window.Annotesto.storage.fetchDocAnnotation(this.id,this.parent_gid)
+	    .then(response => this.button.innerText = response['doc_tags']);
+
 	this.button.addEventListener('click', e => {
 	    let prevAnnot = this.doc_annotations;
 	    this.doc_annotations = prompt('Document tags (separate with ,):', this.doc_annotations);
 	    this.button.innerText = this.doc_annotations;
 	    if (prevAnnot !== this.doc_annotations && window.Annotesto.storage) window.Annotesto.storage.sendAnnotation(this);
+	});
+    }
+
+    createSlider() {
+	this.slider = document.createElement('input');
+	this.slider.id = 'adoc-' + this.id;
+	this.slider.type = "range";
+	this.slider.min = window.Annotesto.config.doctags[0];
+	this.slider.max = window.Annotesto.config.doctags[2];
+	this.slider.value = window.Annotesto.config.doctags[1];
+	this.adocElement.parentNode.insertBefore(
+	    this.slider,
+	    this.adocElement
+	);
+	if (window.Annotesto.storage)
+	    window.Annotesto.storage.fetchDocAnnotation(this.id,this.parent_gid)
+	    .then(response => this.slider.value = response['doc_tags']);
+	    
+	this.slider.addEventListener('change', e => {
+	    this.doc_annotations = this.slider.value;
+	    if (window.Annotesto.storage) window.Annotesto.storage.sendAnnotation(this);
 	});
     }
 }
