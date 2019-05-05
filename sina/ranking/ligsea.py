@@ -258,7 +258,8 @@ class Ligsea(object):
                     for sent_assoc in self.gene_association[gene][assoc]
                 },
                 tags = ['gene',self.assoc.pattern,'relation'],
-                host = server if isinstance(server,str) else '127.0.0.1'
+                host = server.split(':')[0] if isinstance(server,str) else '127.0.0.1',
+                port = server.split(':')[1] if isinstance(server,str) and ':' in server else 5000
             )
             self.anse.run()
 
@@ -660,7 +661,7 @@ class Ligsea(object):
         self.geos = geos
 
 class AnnotatorServer(object):
-    def __init__(self, sentences, annotations=None, tags=[], host='127.0.0.1'):
+    def __init__(self, sentences, annotations=None, tags=[], host='127.0.0.1', port=5000):
         """Annotation server
 
         References:
@@ -679,6 +680,7 @@ class AnnotatorServer(object):
         from flask import Flask, request, render_template
         self.app = Flask('sina') #needs to be package name, where templates/static folder can be found!
         self.host = host
+        self.port = port
         self.sentences = sentences
         self.groupedSentences = not isinstance(sentences[0],str)
         self.annotations = annotations if annotations else OrderedDict()

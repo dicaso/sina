@@ -4,7 +4,7 @@
     const _init = (
 	{
 	    // Annotesto configuration settings
-	    storageUrl = 'http://127.0.0.1:5000',
+	    storageUrl = window.location.origin, //'http://127.0.0.1:5000',
 	    container = '', // id name if single container, class name for multiple
 	    eventContainer = '',
 	    annotElementTag = 'annot-8',
