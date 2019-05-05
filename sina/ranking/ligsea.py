@@ -240,6 +240,7 @@ class Ligsea(object):
                             'label': assoc[2],
                             'id': 0,
                             'parent_id': next(c1),
+                            'parent_gid': geni,
                             'tag_annotations': 'gene',
                             'precedingMatches': 0 #TODO could be different
                             },
@@ -249,6 +250,7 @@ class Ligsea(object):
                                 ].text[assoc[3][0]:assoc[3][1]],
                             'id': 1,
                             'parent_id': next(c2),
+                            'parent_gid': geni,
                             'tag_annotations': self.assoc.pattern,
                             'precedingMatches': 0
                             }
@@ -792,7 +794,7 @@ class AnnotatorServer(object):
                 shutdown_hook()
             return 'Server shutdown'
         
-        self.app.run(host=self.host, debug=debug)
+        self.app.run(host=self.host, port=self.port, debug=debug)
 
 def applyAnnotations(sent,annots):
     replacements = []
