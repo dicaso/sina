@@ -224,7 +224,7 @@ class Ligsea(object):
         # Web ui
         if server:
             hash_sentence_number = [
-                    {hsi:hs for hsi,hs in enumerate((
+                    {hs:hsi for hsi,hs in enumerate((
                     sent_assoc['sent']
                     for assoc in self.gene_association[gene]
                     for sent_assoc in self.gene_association[gene][assoc]
