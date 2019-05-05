@@ -730,7 +730,7 @@ class AnnotatorServer(object):
                 docid=sent_id,
                 prevSent=sent_id-1,
                 nextSent=sent_id+1 if sent_id+1<len(self.sentences) else None,
-                metadata=metadata[sent_id] if metadata else None
+                metadata=self.metadata[sent_id] if self.metadata else None
             )
 
         @self.app.route('/api/annotations',methods=['GET','POST'])
