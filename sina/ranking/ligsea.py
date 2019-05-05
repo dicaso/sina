@@ -265,6 +265,13 @@ class Ligsea(object):
                     for asi,assoc in enumerate(self.gene_association[gene])
                     for sasi,sent_assoc in enumerate(self.gene_association[gene][assoc])
                 },
+                metadata = [
+                    {
+                        'title': gene,
+                        'comment': ', '.join(self.get_gene_aliases(gene)),geni))
+                    }
+                    for geni,gene in enumerate(self.gene_association)
+                ],
                 tags = ['gene',self.assoc.pattern,'relation'],
                 host = server.split(':')[0] if isinstance(server,str) else '127.0.0.1',
                 port = server.split(':')[1] if isinstance(server,str) and ':' in server else 5000
@@ -669,7 +676,7 @@ class Ligsea(object):
         self.geos = geos
 
 class AnnotatorServer(object):
-    def __init__(self, sentences, annotations=None, tags=[], host='127.0.0.1', port=5000):
+    def __init__(self, sentences, annotations=None, metadata=None, tags=[], host='127.0.0.1', port=5000):
         """Annotation server
 
         References:
@@ -682,6 +689,8 @@ class AnnotatorServer(object):
             sentences (list): list of [list of] sentence strings to annotate
               If list of list, each list of sentences is presented in the same document
             annotations (list): list of annotations for every sentence
+            metadata (list): list of metadata for every (group of) sentence(s), which
+              will be used for rendering title and other metadata on webpage.
             tags (list): list of tags that will be preloaded in ui legend
             host (str): host ip
         """
@@ -692,6 +701,7 @@ class AnnotatorServer(object):
         self.sentences = sentences
         self.groupedSentences = not isinstance(sentences[0],str)
         self.annotations = annotations if annotations else OrderedDict()
+        self.metadata = metadata
         self.tags = tags
 
     def run(self, debug=False):
@@ -719,7 +729,8 @@ class AnnotatorServer(object):
                 groupedSentences=self.groupedSentences,
                 docid=sent_id,
                 prevSent=sent_id-1,
-                nextSent=sent_id+1 if sent_id+1<len(self.sentences) else None
+                nextSent=sent_id+1 if sent_id+1<len(self.sentences) else None,
+                metadata=metadata[sent_id] if metadata else None
             )
 
         @self.app.route('/api/annotations',methods=['GET','POST'])

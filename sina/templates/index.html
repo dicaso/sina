@@ -24,6 +24,12 @@
 	</div>
       </div>
 
+      {% if metadata %}
+      <div id="annot8meta">
+	{{ metadata['title'] }} - {{ metadata['comment'] }}
+      </div>
+      {% endif %}
+      
       {# There should not be any whitespace between sentence and
       container html element #}
       {% if groupedSentences %}
