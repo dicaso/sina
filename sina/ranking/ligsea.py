@@ -223,8 +223,14 @@ class Ligsea(object):
 
         # Web ui
         if server:
-            import itertools as it
-            c1,c2,d = it.count(),it.count(),it.count()
+            hash_sentence_number = [
+                    {hsi:hs for hsi,hs in enumerate((
+                    sent_assoc['sent']
+                    for assoc in self.gene_association[gene]
+                    for sent_assoc in self.gene_association[gene][assoc]
+                    ))}
+                    for gene in self.gene_association
+            ]
             self.anse = AnnotatorServer(
                 sentences = [
                     [
@@ -234,12 +240,12 @@ class Ligsea(object):
                     ]
                     for gene in self.gene_association
                 ],
-                annotations = {(geni,next(d)):
+                annotations = {(geni,hash_sentence_number[geni][sent_assoc['sent']]):
                     ['',{
                         0: {
                             'label': assoc[2],
                             'id': 0,
-                            'parent_id': next(c1),
+                            'parent_id': hash_sentence_number[geni][sent_assoc['sent']],
                             'parent_gid': geni,
                             'tag_annotations': 'gene',
                             'precedingMatches': 0 #TODO could be different
@@ -249,15 +255,15 @@ class Ligsea(object):
                                 sent_assoc['sent']
                                 ].text[assoc[3][0]:assoc[3][1]],
                             'id': 1,
-                            'parent_id': next(c2),
+                            'parent_id': hash_sentence_number[geni][sent_assoc['sent']],
                             'parent_gid': geni,
                             'tag_annotations': self.assoc.pattern,
                             'precedingMatches': 0
                             }
                     }]
                     for geni,gene in enumerate(self.gene_association)
-                    for assoc in self.gene_association[gene]
-                    for sent_assoc in self.gene_association[gene][assoc]
+                    for asi,assoc in enumerate(self.gene_association[gene])
+                    for sasi,sent_assoc in enumerate(self.gene_association[gene][assoc])
                 },
                 tags = ['gene',self.assoc.pattern,'relation'],
                 host = server.split(':')[0] if isinstance(server,str) else '127.0.0.1',
