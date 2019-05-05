@@ -268,9 +268,9 @@ class Ligsea(object):
                 metadata = [
                     {
                         'title': gene,
-                        'comment': ', '.join(self.get_gene_aliases(gene)),geni))
+                        'comment': ', '.join(self.get_gene_aliases(gene))
                     }
-                    for geni,gene in enumerate(self.gene_association)
+                    for gene in self.gene_association
                 ],
                 tags = ['gene',self.assoc.pattern,'relation'],
                 host = server.split(':')[0] if isinstance(server,str) else '127.0.0.1',
