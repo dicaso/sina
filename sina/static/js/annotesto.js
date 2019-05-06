@@ -97,7 +97,7 @@ class ADoc { // Annotation document - could be one per page or more
 	this.id = Number(id);
 	this.parent_gid = Number(adocElement.getAttribute('data-adoc-gid'));
 	this.adocElement = adocElement;
-	this.doc_annotations = init_tags?init_tags:'';
+	this.doc_annotations = init_tags?init_tags:null;
 	if (window.Annotesto.config.doctags)
 	    this.createSlider();
 	else this.createButton();
@@ -125,24 +125,54 @@ class ADoc { // Annotation document - could be one per page or more
 	});
     }
 
+    flipbgslider() {
+	if (this.sliderDiv.style.borderRadius) {
+	    this.sliderDiv.style.background = null;
+	    this.sliderDiv.style.borderRadius = null;
+	}
+	else {
+	    this.sliderDiv.style.background = 'rgba(50,100,50,0.3)';
+	    this.sliderDiv.style.borderRadius = '15px';
+	}
+    }
+    
     createSlider() {
+	this.sliderDiv = document.createElement('div');
 	this.slider = document.createElement('input');
 	this.slider.id = 'adoc-' + this.id;
 	this.slider.type = "range";
 	this.slider.min = window.Annotesto.config.doctags[0];
 	this.slider.max = window.Annotesto.config.doctags[2];
 	this.slider.value = window.Annotesto.config.doctags[1];
+	this.sliderDiv.appendChild(this.slider);
 	this.adocElement.parentNode.insertBefore(
-	    this.slider,
+	    this.sliderDiv,
 	    this.adocElement
 	);
 	if (window.Annotesto.storage)
 	    window.Annotesto.storage.fetchDocAnnotation(this.id,this.parent_gid)
-	    .then(response => this.slider.value = response['doc_tags']);
+	    .then(response => {
+		this.doc_annotations = response['doc_tags'];
+		this.slider.value = this.doc_annotations;
+		if (this.doc_annotations !== null) this.flipbgslider();
+	    });
 	    
 	this.slider.addEventListener('change', e => {
-	    this.doc_annotations = this.slider.value;
+	    if (this.doc_annotations === null) this.flipbgslider();
+	    this.doc_annotations = Number(this.slider.value);
 	    if (window.Annotesto.storage) window.Annotesto.storage.sendAnnotation(this);
+	});
+
+	this.slider.addEventListener('click', e => {
+	    if (this.doc_annotations === null) {
+		this.doc_annotations = Number(this.slider.value);
+		this.flipbgslider();
+		if (window.Annotesto.storage) window.Annotesto.storage.sendAnnotation(this);
+	    } else if (this.doc_annotations === window.Annotesto.config.doctags[1]) {
+		this.doc_annotations = null;
+		this.flipbgslider();
+		if (window.Annotesto.storage) window.Annotesto.storage.sendAnnotation(this);
+	    }
 	});
     }
 }

@@ -791,7 +791,7 @@ class AnnotatorServer(object):
                 {
                     'id':doc_id,
                     'doc_tags': self.annotations[doc_id][0]
-                    if doc_id in self.annotations else ''
+                    if doc_id in self.annotations else None
                 }
             )
 
