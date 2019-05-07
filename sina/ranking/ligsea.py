@@ -223,7 +223,7 @@ class Ligsea(object):
 
         # Web ui
         if server:
-            hash_sentence_number = [
+            hash_sentence_number = [ #TODO this is overwriting same sentences for different genes
                     {hs:hsi for hsi,hs in enumerate((
                     sent_assoc['sent']
                     for assoc in self.gene_association[gene]
@@ -274,7 +274,8 @@ class Ligsea(object):
                 ],
                 tags = ['gene',self.assoc.pattern,'relation'],
                 host = server.split(':')[0] if isinstance(server,str) else '127.0.0.1',
-                port = server.split(':')[1] if isinstance(server,str) and ':' in server else 5000
+                port = server.split(':')[1] if isinstance(server,str) and ':' in server else 5000,
+                cache = os.path.join(os.path.expanduser(self.corpus_location),'.annotations.wui.shelve')
             )
             self.anse.run()
 
@@ -676,7 +677,7 @@ class Ligsea(object):
         self.geos = geos
 
 class AnnotatorServer(object):
-    def __init__(self, sentences, annotations=None, metadata=None, tags=[], host='127.0.0.1', port=5000):
+    def __init__(self, sentences, annotations=None, metadata=None, tags=[], cache=False, host='127.0.0.1', port=5000):
         """Annotation server
 
         References:
@@ -686,13 +687,15 @@ class AnnotatorServer(object):
             https://www.w3.org/TR/selection-api/
         
         Args:
-            sentences (list): list of [list of] sentence strings to annotate
+            sentences (list): list of [list of] sentence strings [per group] to annotate
               If list of list, each list of sentences is presented in the same document
-            annotations (list): list of annotations for every sentence
+            annotations (list): list of [list of] annotations for every sentence [group]
             metadata (list): list of metadata for every (group of) sentence(s), which
               will be used for rendering title and other metadata on webpage.
             tags (list): list of tags that will be preloaded in ui legend
+            cache (str): to store annotations provide filename for shelve
             host (str): host ip
+            port (int): host port
         """
         from flask import Flask, request, render_template
         self.app = Flask('sina') #needs to be package name, where templates/static folder can be found!
@@ -703,6 +706,15 @@ class AnnotatorServer(object):
         self.annotations = annotations if annotations else OrderedDict()
         self.metadata = metadata
         self.tags = tags
+        if cache:
+            import shelve
+            self.cache = shelve.open(cache)
+            # Reload earlier annotations
+            for key in self.annotations:
+                if str(key) in self.cache:
+                    self.annotations[key] = self.cache[str(key)]
+        else:
+            self.cache = False
 
     def run(self, debug=False):
         from flask import Flask, request, render_template, jsonify
@@ -733,7 +745,7 @@ class AnnotatorServer(object):
                 metadata=self.metadata[sent_id] if self.metadata else None
             )
 
-        @self.app.route('/api/annotations',methods=['GET','POST'])
+        @self.app.route('/api/annotations',methods=['POST'])
         def api():
             self.app.logger.debug(request.json)
             # POST data looks like
@@ -749,6 +761,8 @@ class AnnotatorServer(object):
                     self.annotations[docid][1][data['id']] = data
                 elif data['type'] == 'doc_annotation':
                     self.annotations[docid][0] = data['doc_annotations']
+                if self.cache: # Update cache
+                    self.cache[str(docid)] = self.annotations[docid]
                     
                 return jsonify({'id': data['id']})
 
@@ -766,6 +780,8 @@ class AnnotatorServer(object):
                 docid = int(data['parent_id'])
                 if 'parent_gid' in data: docid = (data['parent_gid'],docid)
                 self.annotations[docid][1].pop(data['id'])
+                if self.cache: # Update cache
+                    self.cache[str(docid)] = self.annotations[docid]
                 return jsonify({'removed_id': data['id']})
 
         @self.app.route('/api/search/<int:doc_id>/<int:annot_id>',methods=['GET'])

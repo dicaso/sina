@@ -232,7 +232,7 @@ class Annotation {
 	if (tags) {
 	    this.annotElement.style.backgroundColor = Annotesto.legend(tags);
 	    if (window.Annotesto.storage && wasTagged && (prevTags !== tags))
-		window.Annotesto.storage.updateAnnotation(this);
+		window.Annotesto.storage.updateAnnotation(this); //TODO does not seem to get executed
 	    else if (window.Annotesto.storage) window.Annotesto.storage.sendAnnotation(this)
 		.then(data => console.log(JSON.stringify(data)))
 		.catch(error => console.error(error));
