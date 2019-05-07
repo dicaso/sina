@@ -275,7 +275,7 @@ class Ligsea(object):
                 tags = ['gene',self.assoc.pattern,'relation'],
                 host = server.split(':')[0] if isinstance(server,str) else '127.0.0.1',
                 port = server.split(':')[1] if isinstance(server,str) and ':' in server else 5000,
-                cache = os.path.join(os.path.expanduser(self.corpus_location),'.annotations.wui.shelve')
+                cache = os.path.join(os.path.expanduser(self.corpus.location),'.annotations.wui.shelve')
             )
             self.anse.run()
 
@@ -291,7 +291,7 @@ class Ligsea(object):
                 )
             )
             print(len(self.gene_association),'to evaluate.')
-            with shelve.open(os.path.join(os.path.expanduser(self.corpus_location),'.annotations.shelve')) as stored_annots:
+            with shelve.open(os.path.join(os.path.expanduser(self.corpus.location),'.annotations.shelve')) as stored_annots:
                 for geni,gene in enumerate(self.gene_association):
                     print(colors.green | 'Reviewing gene "%s" (%s)[%s]:' % (gene,', '.join(self.get_gene_aliases(gene)),geni))
                     print(len(self.gene_association[gene]),'associated abstracts.')
