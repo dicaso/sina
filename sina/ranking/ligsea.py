@@ -241,7 +241,7 @@ class Ligsea(object):
                     for gene in self.gene_association
                 ],
                 annotations = {(geni,hash_sentence_number[geni][sent_assoc['sent']]):
-                    ['',{
+                    [None,{
                         0: {
                             'label': assoc[2],
                             'id': 0,
