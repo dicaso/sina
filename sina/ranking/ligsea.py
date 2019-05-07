@@ -706,15 +706,14 @@ class AnnotatorServer(object):
         self.annotations = annotations if annotations else OrderedDict()
         self.metadata = metadata
         self.tags = tags
-        if cache:
+        self.cache = True if cache else False
+        if self.cache:
             import shelve
-            self.cache = shelve.open(cache)
+            self.shelve = shelve.open(cache)
             # Reload earlier annotations
             for key in self.annotations:
-                if str(key) in self.cache:
-                    self.annotations[key] = self.cache[str(key)]
-        else:
-            self.cache = False
+                if str(key) in self.shelve:
+                    self.annotations[key] = self.shelve[str(key)]
 
     def run(self, debug=False):
         from flask import Flask, request, render_template, jsonify
@@ -762,7 +761,7 @@ class AnnotatorServer(object):
                 elif data['type'] == 'doc_annotation':
                     self.annotations[docid][0] = data['doc_annotations']
                 if self.cache: # Update cache
-                    self.cache[str(docid)] = self.annotations[docid]
+                    self.shelve[str(docid)] = self.annotations[docid]
                     
                 return jsonify({'id': data['id']})
 
@@ -781,7 +780,7 @@ class AnnotatorServer(object):
                 if 'parent_gid' in data: docid = (data['parent_gid'],docid)
                 self.annotations[docid][1].pop(data['id'])
                 if self.cache: # Update cache
-                    self.cache[str(docid)] = self.annotations[docid]
+                    self.shelve[str(docid)] = self.annotations[docid]
                 return jsonify({'removed_id': data['id']})
 
         @self.app.route('/api/search/<int:doc_id>/<int:annot_id>',methods=['GET'])
