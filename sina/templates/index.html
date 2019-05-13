@@ -41,6 +41,14 @@
       {% endif %}
       <div class="footer">
 	<br />
+	<div id="sina-nav-footer">
+	  {% if prevSent>=0 %}
+	  <a href="{{ prevSent }}">Previous document</a><br />
+	  {% endif %}
+	  {% if nextSent %}
+	  <a href="{{ nextSent }}">Next document</a><br />
+	  {% endif %}
+	</div>
 	sina project - Christophe Van Neste - <a href="/quit">Stop the
 	annotation server</a>
       </div>
