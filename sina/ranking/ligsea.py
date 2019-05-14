@@ -275,7 +275,10 @@ class Ligsea(object):
                 tags = ['gene',self.assoc.pattern,'relation'],
                 host = server.split(':')[0] if isinstance(server,str) else '127.0.0.1',
                 port = server.split(':')[1] if isinstance(server,str) and ':' in server else 5000,
-                cache = os.path.join(os.path.expanduser(self.corpus.location),'.annotations.wui.shelve')
+                cache = os.path.join(
+                    os.path.expanduser(self.corpus.location),
+                    hashlib.md5((self.topic+self.assoc.pattern).encode()).hexdigest()+'.annotations.wui.shelve'
+                )
             )
             self.anse.run()
 
