@@ -282,6 +282,23 @@ class Ligsea(object):
             )
             self.anse.run()
 
+            # After collecting the annotations through the server, convert annotations
+            # to CLI format
+            self.curated_gene_associations = [
+                (gene,assoc,dict(
+                    valid_annot=self.anse.annotations[
+                        (geni,hash_sentence_number[geni][sent_assoc['sent']])
+                    ][0],
+                    **sent_assoc)
+                )
+                for geni,gene in enumerate(self.gene_association)
+                for asi,assoc in enumerate(self.gene_association[gene])
+                for sasi,sent_assoc in enumerate(self.gene_association[gene][assoc])
+                if self.anse.annotations[
+                    (geni,hash_sentence_number[geni][sent_assoc['sent']])
+                    ][0] is not None
+            ]
+            
         # CLI
         else:
             from plumbum import colors
@@ -294,6 +311,7 @@ class Ligsea(object):
                 )
             )
             print(len(self.gene_association),'to evaluate.')
+            # TODO .annotations.shelve not unique filename as now implemented for flask server version FIX
             with shelve.open(os.path.join(os.path.expanduser(self.corpus.location),'.annotations.shelve')) as stored_annots:
                 for geni,gene in enumerate(self.gene_association):
                     print(colors.green | 'Reviewing gene "%s" (%s)[%s]:' % (gene,', '.join(self.get_gene_aliases(gene)),geni))
@@ -335,16 +353,16 @@ class Ligsea(object):
                 for sent_assoc in self.gene_association[gene][assoc]
                 if sent_assoc['valid_annot']
             ]
-            # Sort according to oldest to newest date
-            self.curated_gene_associations.sort(key=lambda x: x[1][1])
-            self.curated_gene_associations = pd.DataFrame({
-                'gene':[c[0] for c in self.curated_gene_associations],
-                'date':[c[1][1] for c in self.curated_gene_associations],
-                'pmid':[c[1][0] for c in self.curated_gene_associations],
-                'sent':[c[2]['sent'] for c in self.curated_gene_associations],
-                'featurevec':[c[2] for c in self.curated_gene_associations],
-                'annot': [c[2]['valid_annot'] for c in self.curated_gene_associations]
-            })
+        # Sort according to oldest to newest date
+        self.curated_gene_associations.sort(key=lambda x: x[1][1])
+        self.curated_gene_associations = pd.DataFrame({
+            'gene':[c[0] for c in self.curated_gene_associations],
+            'date':[c[1][1] for c in self.curated_gene_associations],
+            'pmid':[c[1][0] for c in self.curated_gene_associations],
+            'sent':[c[2]['sent'] for c in self.curated_gene_associations],
+            'featurevec':[c[2] for c in self.curated_gene_associations],
+            'annot': [c[2]['valid_annot'] for c in self.curated_gene_associations]
+        })
     
     def train_gene_evaluations(self, test_size=0.25, random_state=1000):
         """Based on evaluations already provided
