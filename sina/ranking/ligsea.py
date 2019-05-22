@@ -590,6 +590,7 @@ class Ligsea(object):
                 lastTopGene = stratum.gene.iloc[stratum_top_size-1]
                 lastTopGene_i = genetable.index.get_loc(lastTopGene)
                 nextGene = genetable.index[lastTopGene_i+1]
+                import pdb; pdb.set_trace()
                 if gsea_leading_edge:
                     enrichmentscore = gsea_es(genetable, self.rankcol, genesetcol='stratum_geneset')
                     date_relevancies[date] = enrichmentscore.idxmax()
