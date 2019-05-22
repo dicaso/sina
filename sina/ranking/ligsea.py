@@ -475,7 +475,9 @@ class Ligsea(object):
             geneLines (bool): draw lines from first mention of a gene.
         """
         import matplotlib.pyplot as plt
+        # Prepare genetable
         genetable = self.genetable.set_index(self.genecol)
+        genetable = genetable[(~genetable.index.isna())&(~genetable.index.duplicated())]
         self.curated_gene_associations['ranks'] = [
             aggregate(genetable[self.rankcol][g]) if g in genetable.index else None
             for g in self.curated_gene_associations.gene
