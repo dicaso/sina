@@ -605,7 +605,7 @@ class Ligsea(object):
                         date_relevancies[date] = lastTopGene # relevancy section contains the last top gene
                     else:
                         date_relevancies[date] = genetable.index[lastTopGene_i+i]
-           else: date_relevancies[date] = None
+            else: date_relevancies[date] = None
         
         self.date_relevancies = pd.DataFrame(list(date_relevancies.items()),columns=('date','gene'))
         self.date_relevancies['ranks'] = self.date_relevancies.gene.apply(
