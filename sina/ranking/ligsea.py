@@ -522,7 +522,8 @@ class Ligsea(object):
 
     def calculate_enrichment(
             self,rel_alpha=.05,ascending=None,nulldistrosize=1000,max_enrich=None,
-            plot=True, enrich_color='g', enrich_marker='+', enrich_line=True
+            plot=True, enrich_color='g', enrich_marker='+', enrich_line=True,
+            gsea_leading_edge=True
         ):
         """Caclulate enrichment set for each time point
 
@@ -578,6 +579,8 @@ class Ligsea(object):
                     previousTopPassed = (stratum_top_size, ranksum, rankprob)
                 else: break # break if ranksum top of stratum does not meet relevancy cutoff
             if previousTopPassed:
+                # Set genetable stratum_geneset column for enrichment score calculation
+                genetable['stratum_geneset'] = genetable.index.isin(stratum.gene)
                 # Save relevant known gene
                 date_relevancies_known_gene[date] = stratum.gene[stratum.index[previousTopPassed[0]-1]]
                 # Given that we have a relevant top, we now look for a next 'unknown' gene with combined ranksum value still under cutoff
@@ -587,18 +590,22 @@ class Ligsea(object):
                 lastTopGene = stratum.gene.iloc[stratum_top_size-1]
                 lastTopGene_i = genetable.index.get_loc(lastTopGene)
                 nextGene = genetable.index[lastTopGene_i+1]
-                for i,rankvalue in enumerate(genetable[self.rankcol].loc[nextGene:]):
-                    ranksum = previousTopPassed[1]+rankvalue
-                    rankprob = (
-                        self.nulldistros[stratum_top_size+1]<=ranksum if ascending_ranks else
-                        self.nulldistros[stratum_top_size+1]>=ranksum
-                    ).mean()
-                    if rankprob > rel_alpha: break
-                if i-1 < 0:
-                    date_relevancies[date] = lastTopGene # relevancy section contains the last top gene
+                if gsea_leading_edge:
+                    enrichmentscore = gsea_es(genetable, self.rankcol, genesetcol='stratum_geneset')
+                    date_relevancies[date] = enrichmentscore.idxmax()
                 else:
-                    date_relevancies[date] = genetable.index[lastTopGene_i+i]
-            else: date_relevancies[date] = None
+                    for i,rankvalue in enumerate(genetable[self.rankcol].loc[nextGene:]):
+                        ranksum = previousTopPassed[1]+rankvalue
+                        rankprob = (
+                            self.nulldistros[stratum_top_size+1]<=ranksum if ascending_ranks else
+                            self.nulldistros[stratum_top_size+1]>=ranksum
+                        ).mean()
+                        if rankprob > rel_alpha: break
+                    if i-1 < 0:
+                        date_relevancies[date] = lastTopGene # relevancy section contains the last top gene
+                    else:
+                        date_relevancies[date] = genetable.index[lastTopGene_i+i]
+           else: date_relevancies[date] = None
         
         self.date_relevancies = pd.DataFrame(list(date_relevancies.items()),columns=('date','gene'))
         self.date_relevancies['ranks'] = self.date_relevancies.gene.apply(
@@ -697,6 +704,44 @@ class Ligsea(object):
                     if an.text.startswith('G'): geos.append(an.text)
         self.geos = geos
 
+def gsea_es(rankeddf,rankcol,genesetcol):#,ascending=True):
+    """Similar algorithm as Broad GSEA
+    to calculate enrichment score.
+
+    Args:
+        rankeddf (pd.DataFrame): ranked dataframe
+
+    Returns pd.Series of the enrichment scores with same index as `rankeddf`
+    """
+    import math
+    rankeddf = rankeddf[[rankcol,genesetcol]].copy()
+    N_set = rankeddf[genesetcol].sum()
+    N_oth = len(rankeddf) - N_set
+    #rankeddf['insetmultiplier'] = rankeddf[genesetcol].map(
+    #    {True:N_set/len(rankeddf),False:N_oth/len(rankeddf)} #inset probability
+        #{True:1/N_set,False:-1/N_oth}
+        #{True:1,False:-1}
+    #)
+    rankeddf['ranks'] = rankeddf[rankcol].rank()
+    rankeddf['set_observations'] = rankeddf[genesetcol].cumsum()
+    rankeddf['oth_observations'] = (~rankeddf[genesetcol]).cumsum()
+    
+    #rankeddf['rankweight'] = rankeddf.ranks**-1
+    #if ascending: rankeddf[rankcol] = rankeddf[rankcol]**-1
+    rankeddf['e_score'] = (rankeddf['set_observations']/N_set) - (rankeddf['oth_observations']/N_oth)
+    #rankeddf.T.apply(
+    #    lambda x: math.sqrt(N_oth/N_set) if x[genesetcol]
+    #    else -math.sqrt(N_set/N_oth)
+    #)
+    #rankeddf.T.apply(
+    #    lambda x: (x.ranks*x.insetmultiplier)/x.set_observations if x[genesetcol]
+    #    else -(x.ranks*x.insetmultiplier)/(x.ranks-x.set_observations)
+    #)
+    #rankeddf[rankcol]*rankeddf.rankweight*rankeddf.insetmultiplier
+    #rankeddf['e_score'] = rankeddf.e_contribution.cumsum()
+    return rankeddf.e_score
+    
+        
 class AnnotatorServer(object):
     def __init__(self, sentences, annotations=None, metadata=None, tags=[], cache=False, host='127.0.0.1', port=5000):
         """Annotation server
