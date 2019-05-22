@@ -524,7 +524,7 @@ class Ligsea(object):
 
     def calculate_enrichment(
             self,rel_alpha=.05,ascending=None,nulldistrosize=1000,max_enrich=None,
-            plot=True, enrich_color='g', enrich_marker='+', enrich_line=True, enrich_linewidth=2
+            plot=True, enrich_color='g', enrich_marker='+', enrich_line=True, enrich_linewidth=2,
             gsea_leading_edge=True
         ):
         """Caclulate enrichment set for each time point
