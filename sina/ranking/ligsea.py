@@ -484,10 +484,6 @@ class Ligsea(object):
         ]
         fig,ax = plt.subplots()
         first_gene_mention = ~self.curated_gene_associations.gene.duplicated()
-        ax.scatter(
-            self.curated_gene_associations[first_gene_mention].dropna().date.values,
-            self.curated_gene_associations[first_gene_mention].dropna().ranks.values
-        )
         if geneLines:
             ax.hlines(
                 self.curated_gene_associations[first_gene_mention].dropna().ranks.values,
@@ -498,6 +494,10 @@ class Ligsea(object):
         ax.scatter(
             self.curated_gene_associations[~first_gene_mention].dropna().date.values,
             self.curated_gene_associations[~first_gene_mention].dropna().ranks.values
+        )
+        ax.scatter( # First mentions plotted last so they are in first layer
+            self.curated_gene_associations[first_gene_mention].dropna().date.values,
+            self.curated_gene_associations[first_gene_mention].dropna().ranks.values
         )
         ax.set_ylim((genetable[self.rankcol].min(),genetable[self.rankcol].max()))
         ax.set_xlabel('publication year')
@@ -524,7 +524,7 @@ class Ligsea(object):
 
     def calculate_enrichment(
             self,rel_alpha=.05,ascending=None,nulldistrosize=1000,max_enrich=None,
-            plot=True, enrich_color='g', enrich_marker='+', enrich_line=True,
+            plot=True, enrich_color='g', enrich_marker='+', enrich_line=True, enrich_linewidth=2
             gsea_leading_edge=True
         ):
         """Caclulate enrichment set for each time point
@@ -619,10 +619,11 @@ class Ligsea(object):
         )
         if plot:
             ax = self.plot_ranked_gene_associations()
+            plotkwgs = {'linewidth': enrich_linewidth} if enrich_line else {}
             plotfn = ax.plot if enrich_line else ax.scatter
             plotfn(
                 self.date_relevancies.dropna().date, self.date_relevancies.dropna().ranks,
-                c=enrich_color, marker=enrich_marker
+                c=enrich_color, marker=enrich_marker, **plotkwgs
             )
         
     def predict_number_of_relevant_genes(self,plot=True,surges=1,predict_future_years=50):
