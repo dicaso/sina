@@ -44,14 +44,20 @@ class Ligsea(object):
             assoc_regex if not isinstance(assoc_regex, str) else
             re.compile(assoc_regex, assoc_regex_flags)
         )
+        self.load_genetable(gene_table_file, gene_column, rank_column, **kwargs)
+
+    def load_genetable(self, gene_table_file, gene_column=None, rank_column=None, **kwargs):
         if gene_table_file.endswith('.csv'):
             self.genetable = pd.read_csv(gene_table_file,**kwargs)
         elif gene_table_file.endswith('.xlx') | gene_table_file.endswith('.xlsx'):
             self.genetable = pd.read_excel(gene_table_file,**kwargs)
         else: raise Exception('filetype "%s" not recognised' % gene_table_file.split('.')[-1])
-        self.genecol = gene_column
-        self.rankcol = rank_column
-
+        if gene_column: self.genecol = gene_column
+        if rank_column: self.rankcol = rank_column
+        # Clear caches from previous genetables/experiments
+        if hasattr(self,'nulldistros'):
+            del self.nulldistros
+        
     def to_json(self, filename, attributes={'documents','associations','gene_association','gene_association_sents'}):
         """Save object state to json, by default all documents and attributes provided in
         extra_attributes.
@@ -543,6 +549,8 @@ class Ligsea(object):
               the density of geneset genes and other genes becomes lower than that of the
               originally found enriched set.
         """
+        ax = self.plot_ranked_gene_associations()
+        
         # Prepare genetable
         genetable = self.genetable.set_index(self.genecol)
         genetable = genetable[(~genetable.index.isna())&(~genetable.index.duplicated())]
@@ -618,7 +626,6 @@ class Ligsea(object):
             lambda x: None if x is None else genetable[self.rankcol][x]
         )
         if plot:
-            ax = self.plot_ranked_gene_associations()
             plotkwgs = {'linewidth': enrich_linewidth} if enrich_line else {}
             plotfn = ax.plot if enrich_line else ax.scatter
             plotfn(
