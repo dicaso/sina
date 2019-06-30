@@ -61,14 +61,14 @@ class PubmedCollection(BaseDocumentCollection):
     >>> pmc = PubmedCollection('pubmed','~/pubmed')
     >>> pmc.retrieve_documents()
     """
-    def retrieve_documents(self,check_md5=False):
+    def retrieve_documents(self,ftplocation='pubmed/baseline',check_md5=False):
         import ftplib, hashlib
         ftp = ftplib.FTP(
             host='ftp.ncbi.nlm.nih.gov',
             user='anonymous',
             passwd='christophe.vanneste@kaust.edu.sa' #TODO fetch from kindi
         )
-        ftp.cwd('pubmed/baseline')
+        ftp.cwd(ftplocation)
         filenames = ftp.nlst()
         for filename in filenames:
             localfilename = os.path.join(self.location,filename)
@@ -90,20 +90,39 @@ class PubmedCollection(BaseDocumentCollection):
                 print('Retrieving',filename)
                 with open(localfilename,'wb') as fh:
                     ftp.retrbinary('RETR '+ filename, fh.write)
-        ftp.quit()
+        ftp.close() #ftp.quit()
 
-    def process_documents(self,callback,*args,verbose=False,progress=True,**kwargs):
+    def update(self):
+        """Retrieve new documents and process them.
+        Could be used to start from scratch.
+
+        Updated pubmed xml documents contain new, revised and deleted abstracts,
+        and should be handled accordingly.
+        """
+        self.retrieve_documents(check_md5=True)
+        self.retrieve_documents(ftplocation='pubmed/updatefiles',check_md5=True)
+
+    def process_documents(self,callback,*args,verbose=False,progress=True,onepass=False,**kwargs):
         """process documents with a callback function
         
         Args:
             callback (function): function that will take the title, abstract text, and full
               xml element as first positional arguments and any further provided arguments
+            verbose (bool): verbose output
+            progress (bool): show progress
+            onepass (str): if a str is given, it will track wich documents have already been
+              processed with the callback and skip them. It is up to the developer to provide
+              a suitable filename that will be used for the tracking.
         """
-        import hashlib
+        import hashlib, json
         xmlfilenames = glob.glob(os.path.join(self.location,'*.xml.gz'))
         totalxmlfiles = len(xmlfilenames)
         article_pos = 0
+        if onepass:
+            try: processedFiles = set(json.load(open(os.path.join(self.location, onepass))))
+            except FileNotFoundError: processedFiles = set()
         for xmli,xmlfilename in enumerate(xmlfilenames):
+            if onepass and os.path.basename(xmlfilename) in processedFiles: continue
             #check md5
             md5 = open(xmlfilename+'.md5').read().strip().split()[1]
             with open(xmlfilename,'rb') as file_to_check:
@@ -130,6 +149,9 @@ class PubmedCollection(BaseDocumentCollection):
                         # but because of the 'clear' you cannot use the root for info on
                         # current iterated PubmedArticle element
             if progress: print(end='\rProgress (%): {:<10}'.format(xmli/totalxmlfiles)*100)
+            if onepass: processedFiles.add(os.path.basename(xmlfilename))
+        if onepass:
+            json.dump(list(processedFiles), open(os.path.join(self.location, onepass),'wt'))
 
     def build_document_index(self, shards=10):
         """Build an index for fast document retrieval
@@ -137,7 +159,7 @@ class PubmedCollection(BaseDocumentCollection):
         shards (int): The number of document partitionings to use. Whoosh has memory issues
           for large indexes, this is a way around.
         """
-        from whoosh.index import create_in
+        from whoosh.index import create_in, open_dir
         from whoosh import fields
         schema = fields.Schema(
             title=fields.TEXT(stored=True),
@@ -148,11 +170,14 @@ class PubmedCollection(BaseDocumentCollection):
             #articlepos=fields.INT()
         )
         indexdir = os.path.join(self.location,'.index')
-        os.mkdir(indexdir)
+        if not os.path.exists(indexdir):
+            os.mkdir(indexdir)
         ix = []
         for iix in range(shards):
-            os.mkdir(os.path.join(indexdir,str(iix)))
-            ix.append(create_in(os.path.join(indexdir,str(iix)), schema))
+            if not os.path.exists(os.path.join(indexdir,str(iix))):
+                os.mkdir(os.path.join(indexdir,str(iix)))
+                ix.append(create_in(os.path.join(indexdir,str(iix)), schema))
+            else: ix.append(open_dir(os.path.join(indexdir,str(iix)), schema=schema))
         def commit_abstracts(title,abstract,elem,position):
             import datetime
             date = datetime.datetime(
@@ -168,7 +193,7 @@ class PubmedCollection(BaseDocumentCollection):
                 date=date
             )
             writer.commit()
-        self.process_documents(commit_abstracts)
+        self.process_documents(commit_abstracts, onepass='.indexed_files.json')
 
     def query_document_index(self,query,sortbydate=False):
         """Query the corpus index

@@ -88,15 +88,18 @@ class Ligsea(object):
         """Load in object from json file"""
         raise NotImplementedError
 
-    def retrieve_documents(self, corpus_class=PubmedCollection, corpus_location='~/pubmed'):
+    def retrieve_documents(self, corpus_class=PubmedCollection, corpus_location='~/pubmed', latest=False):
         """Retrieve associations within the specified `corpus_class`.
 
         Args:
             corpus_class (sina.documents.BaseDocumentCollection): the document 
               class in which the search will be executed.
             corpus_location (str): Path to corpus directory.
+            latest (bool): If True, retrieve latest pubmed articles. This requires
+              indexing those new abstracts and therefore may require extra time.
         """
         self.corpus = corpus_class('pubmed',corpus_location)
+        #TODO update corpus if latest
         self.documents = self.corpus.query_document_index(self.topic)
         self.associations = [d for d in self.documents if self.assoc.search(d['content'])]
 
