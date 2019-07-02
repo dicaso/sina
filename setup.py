@@ -10,6 +10,7 @@ setup(name = 'sina',
       packages = find_packages(),
       python_requires='>3.6',
       install_requires = [
+          'kindi',
           'requests',
           'pandas',
           'bidali',

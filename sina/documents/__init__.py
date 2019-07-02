@@ -63,10 +63,11 @@ class PubmedCollection(BaseDocumentCollection):
     """
     def retrieve_documents(self,ftplocation='pubmed/baseline',check_md5=False):
         import ftplib, hashlib
+        from sina.config import secrets
         ftp = ftplib.FTP(
             host='ftp.ncbi.nlm.nih.gov',
             user='anonymous',
-            passwd='christophe.vanneste@kaust.edu.sa' #TODO fetch from kindi
+            passwd=secrets.getsecret('email')
         )
         ftp.cwd(ftplocation)
         filenames = ftp.nlst()
@@ -138,9 +139,11 @@ class PubmedCollection(BaseDocumentCollection):
                         pass
                     elif event == "end" and elem.tag == "PubmedArticle":
                         try:
+                            pmid = int(elem.find('MedlineCitation/PMID').text)
                             title = elem.find('MedlineCitation/Article/ArticleTitle').text
                             abstract = elem.find('MedlineCitation/Article/Abstract/AbstractText').text
-                            callback(title,abstract,elem,(xmli,article_pos),*args,**kwargs) #TODO save map xmli to filename
+                            callback(title,abstract,elem,(xmli,pmid),*args,**kwargs) #TODO save map xmli to filename
+                            # changed article_pos to pmid => might give some downstream issues
                         except AttributeError as e:
                             if verbose: print(e)
                         article_pos += 1
@@ -194,6 +197,68 @@ class PubmedCollection(BaseDocumentCollection):
             )
             writer.commit()
         self.process_documents(commit_abstracts, onepass='.indexed_files.json')
+
+    def build_document_index_mp(self, shards=10):
+        """Build an index for fast document retrieval with multiprocessing (one process/shard)
+
+        shards (int): The number of document partitionings to use. Whoosh has memory issues
+          for large indexes, this is a way around.
+        """
+        import multiprocessing as mp
+        queues = [mp.Queue() for i in range(shards)]
+        indexdir = os.path.join(self.location,'.index')
+        if not os.path.exists(indexdir):
+            os.mkdir(indexdir)
+
+        def worker_function(shardnumber):
+            from whoosh.index import create_in, open_dir
+            from whoosh import fields
+            import datetime
+
+            schema = fields.Schema(
+                title=fields.TEXT(stored=True),
+                pmid=fields.ID(stored=True),
+                content=fields.TEXT(stored=True),
+                date=fields.DATETIME(stored=True),
+                #filepos=fields.INT(),
+                #articlepos=fields.INT()
+            )
+
+            if not os.path.exists(os.path.join(indexdir,str(shardnumber))):
+                os.mkdir(os.path.join(indexdir,str(shardnumber)))
+                ix = create_in(os.path.join(indexdir,str(shardnumber)), schema)
+            else: ix = open_dir(os.path.join(indexdir,str(shardnumber)), schema=schema)
+
+            while True:
+                title,abstract,elem,position = queues[shardnumber].get()
+                if not elem: break
+
+                date = datetime.datetime(
+                    int(elem.find('MedlineCitation/DateCompleted/Year').text),
+                    int(elem.find('MedlineCitation/DateCompleted/Month').text),
+                    int(elem.find('MedlineCitation/DateCompleted/Day').text)
+                )
+                writer = ix.writer()
+                writer.add_document(
+                    title=title,
+                    pmid=elem.find('MedlineCitation/PMID').text,
+                    content=abstract,
+                    date=date
+                )
+                writer.commit()
+
+        def commit_abstracts(title,abstract,elem,position):
+            queues[position[0] % 10].put([title,abstract,elem,position])
+            #make this position[0]*position[1] to redistribute
+
+        # Start up workers
+        processes = [mp.Process(target=worker_function,args=(i,)) for i in range(shards)]
+        for p in processes: p.start()
+        # Build index
+        self.process_documents(commit_abstracts, onepass='.indexed_files.json')
+        # Wait for all workers to finish
+        for q in queues: q.put([None,None,None,None]) # putting stop signal in each queue
+        for p in processes: p.join()
 
     def query_document_index(self,query,sortbydate=False):
         """Query the corpus index
