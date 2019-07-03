@@ -249,7 +249,7 @@ class PubmedCollection(BaseDocumentCollection):
                 writer.commit()
 
         def commit_abstracts(title,abstract,elem,position):
-            queues[position[0] % shards].put([title,abstract,elem,position])
+            queues[position[1] % shards].put([title,abstract,elem,position])
             #make this position[0]*position[1] to redistribute
 
         # Start up workers
