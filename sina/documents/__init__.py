@@ -229,25 +229,34 @@ class PubmedCollection(BaseDocumentCollection):
                 ix = create_in(os.path.join(indexdir,str(shardnumber)), schema)
             else: ix = open_dir(os.path.join(indexdir,str(shardnumber)), schema=schema)
 
-            writer = ix.writer()
             while True:
                 title,abstract,elem,position = queues[shardnumber].get()
                 if not elem: break
 
-                date = datetime.datetime(
-                    int(elem.find('MedlineCitation/DateCompleted/Year').text),
-                    int(elem.find('MedlineCitation/DateCompleted/Month').text),
-                    int(elem.find('MedlineCitation/DateCompleted/Day').text)
-                )
-
+                if elem.find('MedlineCitation/DateCompleted/Year'):
+                    date = datetime.datetime(
+                        int(elem.find('MedlineCitation/DateCompleted/Year').text),
+                        int(elem.find('MedlineCitation/DateCompleted/Month').text),
+                        int(elem.find('MedlineCitation/DateCompleted/Day').text)
+                    )
+                elif elem.find('MedlineCitation/DateRevised/Year'):
+                    date = datetime.datetime(
+                        int(elem.find('MedlineCitation/DateRevised/Year').text),
+                        int(elem.find('MedlineCitation/DateRevised/Month').text),
+                        int(elem.find('MedlineCitation/DateRevised/Day').text)
+                    )
+                else:
+                    print('No date for',position)
+                    continue #skipping entries without date
+                    
+                writer = ix.writer()
                 writer.add_document(
                     title=title,
                     pmid=elem.find('MedlineCitation/PMID').text,
                     content=abstract,
                     date=date
                 )
-                del title,abstract,elem,position
-            writer.commit()
+                writer.commit()
 
         def commit_abstracts(title,abstract,elem,position):
             queues[position[1] % shards].put([title,abstract,elem,position])
