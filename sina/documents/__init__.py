@@ -233,13 +233,13 @@ class PubmedCollection(BaseDocumentCollection):
                 title,abstract,elem,position = queues[shardnumber].get()
                 if not elem: break
 
-                if elem.find('MedlineCitation/DateCompleted/Year'):
+                if elem.find('MedlineCitation/DateCompleted/Year') is not None:
                     date = datetime.datetime(
                         int(elem.find('MedlineCitation/DateCompleted/Year').text),
                         int(elem.find('MedlineCitation/DateCompleted/Month').text),
                         int(elem.find('MedlineCitation/DateCompleted/Day').text)
                     )
-                elif elem.find('MedlineCitation/DateRevised/Year'):
+                elif elem.find('MedlineCitation/DateRevised/Year') is not None:
                     date = datetime.datetime(
                         int(elem.find('MedlineCitation/DateRevised/Year').text),
                         int(elem.find('MedlineCitation/DateRevised/Month').text),
