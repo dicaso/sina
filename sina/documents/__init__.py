@@ -205,7 +205,7 @@ class PubmedCollection(BaseDocumentCollection):
           for large indexes, this is a way around.
         """
         import multiprocessing as mp
-        queues = [mp.Queue(maxsize=100) for i in range(shards)]
+        queues = [mp.Queue(maxsize=100000) for i in range(shards)]
         indexdir = os.path.join(self.location,'.index')
         if not os.path.exists(indexdir):
             os.mkdir(indexdir)
