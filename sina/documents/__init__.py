@@ -229,6 +229,7 @@ class PubmedCollection(BaseDocumentCollection):
                 ix = create_in(os.path.join(indexdir,str(shardnumber)), schema)
             else: ix = open_dir(os.path.join(indexdir,str(shardnumber)), schema=schema)
 
+            writer = ix.writer()
             while True:
                 title,abstract,elem,position = queues[shardnumber].get()
                 if not elem: break
@@ -238,7 +239,7 @@ class PubmedCollection(BaseDocumentCollection):
                     int(elem.find('MedlineCitation/DateCompleted/Month').text),
                     int(elem.find('MedlineCitation/DateCompleted/Day').text)
                 )
-                writer = ix.writer()
+
                 writer.add_document(
                     title=title,
                     pmid=elem.find('MedlineCitation/PMID').text,
