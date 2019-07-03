@@ -151,7 +151,7 @@ class PubmedCollection(BaseDocumentCollection):
                         root.clear() # ensures only one article is kept in memory
                         # but because of the 'clear' you cannot use the root for info on
                         # current iterated PubmedArticle element
-            if progress: print(end='\rProgress (%): {:<10}'.format(xmli/totalxmlfiles)*100)
+            if progress: print(end='\rProgress (%): {:.4f}'.format(xmli/totalxmlfiles)*100)
             if onepass: processedFiles.add(os.path.basename(xmlfilename))
         if onepass:
             json.dump(list(processedFiles), open(os.path.join(self.location, onepass),'wt'))
@@ -205,7 +205,7 @@ class PubmedCollection(BaseDocumentCollection):
           for large indexes, this is a way around.
         """
         import multiprocessing as mp
-        queues = [mp.Queue() for i in range(shards)]
+        queues = [mp.Queue(maxsize=100) for i in range(shards)]
         indexdir = os.path.join(self.location,'.index')
         if not os.path.exists(indexdir):
             os.mkdir(indexdir)
@@ -217,7 +217,7 @@ class PubmedCollection(BaseDocumentCollection):
 
             schema = fields.Schema(
                 title=fields.TEXT(stored=True),
-                pmid=fields.ID(stored=True),
+                pmid=fields.ID(stored=True,unique=True),
                 content=fields.TEXT(stored=True),
                 date=fields.DATETIME(stored=True),
                 #filepos=fields.INT(),
@@ -245,10 +245,11 @@ class PubmedCollection(BaseDocumentCollection):
                     content=abstract,
                     date=date
                 )
+                del title,abstract,elem,position
                 writer.commit()
 
         def commit_abstracts(title,abstract,elem,position):
-            queues[position[0] % 10].put([title,abstract,elem,position])
+            queues[position[0] % shards].put([title,abstract,elem,position])
             #make this position[0]*position[1] to redistribute
 
         # Start up workers
