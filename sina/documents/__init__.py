@@ -205,7 +205,7 @@ class PubmedCollection(BaseDocumentCollection):
           for large indexes, this is a way around.
         """
         import multiprocessing as mp
-        queues = [mp.Queue(maxsize=1000000) for i in range(shards)]
+        queues = [mp.Queue(maxsize=1000) for i in range(shards)]
         indexdir = os.path.join(self.location,'.index')
         if not os.path.exists(indexdir):
             os.mkdir(indexdir)
@@ -229,6 +229,8 @@ class PubmedCollection(BaseDocumentCollection):
                 ix = create_in(os.path.join(indexdir,str(shardnumber)), schema)
             else: ix = open_dir(os.path.join(indexdir,str(shardnumber)), schema=schema)
 
+            commitCounter = 0
+            commitLoop = 1000 #do a commit every 1000 document inserts
             while True:
                 title,abstract,elem,position = queues[shardnumber].get()
                 if not elem: break
@@ -249,14 +251,16 @@ class PubmedCollection(BaseDocumentCollection):
                     print('No date for',position)
                     continue #skipping entries without date
                     
-                writer = ix.writer()
+                if not (commitCounter % commitLoop): writer = ix.writer()
+                commitCounter+=1 # this ensures that creating writer and committing occur in subsequent loops
                 writer.add_document(
                     title=title,
                     pmid=elem.find('MedlineCitation/PMID').text,
                     content=abstract,
                     date=date
                 )
-                writer.commit()
+                if not (commitCounter % commitLoop): writer.commit()
+            if (commitCounter % commitLoop): writer.commit() # last commit if not committed in last loop
 
         def commit_abstracts(title,abstract,elem,position):
             queues[position[1] % shards].put([title,abstract,elem,position])
