@@ -142,8 +142,7 @@ class PubmedCollection(BaseDocumentCollection):
                             pmid = int(elem.find('MedlineCitation/PMID').text)
                             title = elem.find('MedlineCitation/Article/ArticleTitle').text
                             abstract = elem.find('MedlineCitation/Article/Abstract/AbstractText').text
-                            callback(title,abstract,elem,(xmli,pmid),*args,**kwargs) #TODO save map xmli to filename
-                            # changed article_pos to pmid => might give some downstream issues
+                            callback(title,abstract,elem,(xmli,article_pos,pmid),*args,**kwargs) #TODO save map xmli to filename
                         except AttributeError as e:
                             if verbose: print(e)
                         article_pos += 1
@@ -195,7 +194,7 @@ class PubmedCollection(BaseDocumentCollection):
                     int(elem.find('MedlineCitation/DateRevised/Month').text),
                     int(elem.find('MedlineCitation/DateRevised/Day').text)
                 )
-            writer = ix[position[1] % 10].writer() #make this position[0]*position[1] to redistribute
+            writer = ix[position[2] % 10].writer() #make this position[0]*position[1] to redistribute
             writer.add_document(
                 title=title,
                 pmid=elem.find('MedlineCitation/PMID').text,
@@ -220,7 +219,7 @@ class PubmedCollection(BaseDocumentCollection):
         def worker_function(shardnumber):
             from whoosh.index import create_in, open_dir
             from whoosh import fields
-            import datetime
+            import datetime, sqlite3
 
             schema = fields.Schema(
                 title=fields.TEXT(stored=True),
@@ -234,7 +233,21 @@ class PubmedCollection(BaseDocumentCollection):
             if not os.path.exists(os.path.join(indexdir,str(shardnumber))):
                 os.mkdir(os.path.join(indexdir,str(shardnumber)))
                 ix = create_in(os.path.join(indexdir,str(shardnumber)), schema)
-            else: ix = open_dir(os.path.join(indexdir,str(shardnumber)), schema=schema)
+            else:
+                ix = open_dir(os.path.join(indexdir,str(shardnumber)), schema=schema)
+
+            # create sqlite db
+            conn = sqlite3.connect(
+                os.path.join(indexdir,str(shardnumber),'pmid.db'),
+                detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES
+            )
+            dbcursor = conn.cursor()
+            if not(dbcursor.execute('SELECT name FROM sqlite_master WHERE type="table"').fetchone()):
+                # Create table if this is first connection
+                dbcursor.execute('''CREATE TABLE abstracts
+                    (pmid INTEGER PRIMARY KEY, date TIMESTAMP, filepos INTEGER, articlepos INTEGER)'''
+                )
+                conn.commit()
 
             commitCounter = 0
             commitLoop = 1000 #do a commit every 1000 document inserts
@@ -257,21 +270,53 @@ class PubmedCollection(BaseDocumentCollection):
                 else:
                     print('No date for',position)
                     continue #skipping entries without date
-                    
+
+                # Prepare indexer writer
                 if not (commitCounter % commitLoop): writer = ix.writer()
                 commitCounter+=1 # this ensures that creating writer and committing occur in subsequent loops
+                
+                # Check if article has already been indexed or needs updating
+                try:
+                    dbcursor.execute(
+                        'INSERT INTO abstracts(pmid,date,filepos,articlepos) values (?,?,?,?)',
+                        (position[2],date,position[0],position[1])
+                    )
+                except sqlite3.IntegrityError:
+                    prevpos = dbcursor.execute(
+                        'SELECT filepos,articlepos FROM abstracts WHERE pmid=?',(position[2],)
+                    ).fetchone()
+                    if prevpos[0] == position[0]:
+                        if prevpos[1] == position[1]:
+                            continue # abstract already indexed
+                        else:
+                            raise Exception('same pmid in same file twice')
+                    elif prevpos[0] > position[0]:
+                        continue # has already been updated in a previous run
+                    else: # should be case where update is required
+                        dbcursor.execute(
+                            'UPDATE abstracts SET date=?, filepos=?, articlepos=? WHERE pmid=?',
+                            (date,position[0],position[1],position[2])
+                        )
+                        writer.delete_by_term('pmid', str(position[2]))
+
+                # Indexer code
                 writer.add_document(
                     title=title,
                     pmid=elem.find('MedlineCitation/PMID').text,
                     content=abstract,
                     date=date
                 )
-                if not (commitCounter % commitLoop): writer.commit()
-            if (commitCounter % commitLoop): writer.commit() # last commit if not committed in last loop
+                if not (commitCounter % commitLoop):
+                    writer.commit()
+                    conn.commit()
+            if (commitCounter % commitLoop):
+                # last commit if not committed in last loop
+                writer.commit()
+                conn.commit()
 
         def commit_abstracts(title,abstract,elem,position):
-            queues[position[1] % shards].put([title,abstract,elem,position])
-            #position[1] == pmid
+            queues[position[2] % shards].put([title,abstract,elem,position])
+            #position[2] == pmid
 
         # Start up workers
         processes = [mp.Process(target=worker_function,args=(i,)) for i in range(shards)]
