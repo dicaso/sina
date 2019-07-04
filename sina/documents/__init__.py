@@ -183,12 +183,19 @@ class PubmedCollection(BaseDocumentCollection):
             else: ix.append(open_dir(os.path.join(indexdir,str(iix)), schema=schema))
         def commit_abstracts(title,abstract,elem,position):
             import datetime
-            date = datetime.datetime(
-                int(elem.find('MedlineCitation/DateCompleted/Year').text),
-                int(elem.find('MedlineCitation/DateCompleted/Month').text),
-                int(elem.find('MedlineCitation/DateCompleted/Day').text)
-            )
-            writer = ix[position[0] % 10].writer() #make this position[0]*position[1] to redistribute
+            if elem.find('MedlineCitation/DateCompleted/Year') is not None:
+                date = datetime.datetime(
+                    int(elem.find('MedlineCitation/DateCompleted/Year').text),
+                    int(elem.find('MedlineCitation/DateCompleted/Month').text),
+                    int(elem.find('MedlineCitation/DateCompleted/Day').text)
+                )
+            else:
+                date = datetime.datetime(
+                    int(elem.find('MedlineCitation/DateRevised/Year').text),
+                    int(elem.find('MedlineCitation/DateRevised/Month').text),
+                    int(elem.find('MedlineCitation/DateRevised/Day').text)
+                )
+            writer = ix[position[1] % 10].writer() #make this position[0]*position[1] to redistribute
             writer.add_document(
                 title=title,
                 pmid=elem.find('MedlineCitation/PMID').text,
@@ -264,7 +271,7 @@ class PubmedCollection(BaseDocumentCollection):
 
         def commit_abstracts(title,abstract,elem,position):
             queues[position[1] % shards].put([title,abstract,elem,position])
-            #make this position[0]*position[1] to redistribute
+            #position[1] == pmid
 
         # Start up workers
         processes = [mp.Process(target=worker_function,args=(i,)) for i in range(shards)]
