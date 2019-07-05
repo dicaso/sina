@@ -245,7 +245,7 @@ class PubmedCollection(BaseDocumentCollection):
             if not(dbcursor.execute('SELECT name FROM sqlite_master WHERE type="table"').fetchone()):
                 # Create table if this is first connection
                 dbcursor.execute('''CREATE TABLE abstracts
-                    (pmid INTEGER PRIMARY KEY, date TIMESTAMP, filepos INTEGER, articlepos INTEGER)'''
+                    (pmid INTEGER PRIMARY KEY, date TIMESTAMP, filepos INTEGER, articlepos INTEGER, xmlbytes INTEGER)'''
                 )
                 conn.commit()
 
@@ -313,6 +313,8 @@ class PubmedCollection(BaseDocumentCollection):
                 # last commit if not committed in last loop
                 writer.commit()
                 conn.commit()
+            ix.close()
+            conn.close()
 
         def commit_abstracts(title,abstract,elem,position):
             queues[position[2] % shards].put([title,abstract,elem,position])
