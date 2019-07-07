@@ -219,7 +219,7 @@ class PubmedCollection(BaseDocumentCollection):
         def worker_function(shardnumber):
             from whoosh.index import create_in, open_dir
             from whoosh import fields
-            import datetime, sqlite3
+            import datetime, sqlite3, warnings
 
             schema = fields.Schema(
                 title=fields.TEXT(stored=True),
@@ -289,15 +289,16 @@ class PubmedCollection(BaseDocumentCollection):
                         if prevpos[1] == position[1]:
                             continue # abstract already indexed
                         else:
-                            raise Exception('same pmid in same file twice')
+                            warnings.warn('same pmid ({}) in same file ({}) twice'.format(position[2],position[0]))
                     elif prevpos[0] > position[0]:
                         continue # has already been updated in a previous run
-                    else: # should be case where update is required
-                        dbcursor.execute(
-                            'UPDATE abstracts SET date=?, filepos=?, articlepos=? WHERE pmid=?',
-                            (date,position[0],position[1],position[2])
-                        )
-                        writer.delete_by_term('pmid', str(position[2]))
+                    # should be case where update is required
+                    # TODO include SQL variable for updated records
+                    dbcursor.execute(
+                        'UPDATE abstracts SET date=?, filepos=?, articlepos=? WHERE pmid=?',
+                        (date,position[0],position[1],position[2])
+                    )
+                    writer.delete_by_term('pmid', str(position[2]))
 
                 # Indexer code
                 writer.add_document(
@@ -377,6 +378,8 @@ class PubmedCollection(BaseDocumentCollection):
     def build_xml_index(self):
         """Iterates over all the documents and saves for each pmid the file and corresponding
         positions.
+
+        The last entry of an article will overwrite the earlier version.
         """
         import re, shelve#, sqlite3
         xmlfilenames = glob.glob(os.path.join(self.location,'*.xml.gz'))
