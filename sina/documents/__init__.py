@@ -245,7 +245,7 @@ class PubmedCollection(BaseDocumentCollection):
             if not(dbcursor.execute('SELECT name FROM sqlite_master WHERE type="table"').fetchone()):
                 # Create table if this is first connection
                 dbcursor.execute('''CREATE TABLE abstracts
-                    (pmid INTEGER PRIMARY KEY, date TIMESTAMP, filepos INTEGER, articlepos INTEGER, xmlbytes INTEGER)'''
+                    (pmid INTEGER PRIMARY KEY, version INTEGER, date TIMESTAMP, filepos INTEGER, articlepos INTEGER, xmlbytes INTEGER)'''
                 )
                 conn.commit()
 
@@ -255,6 +255,14 @@ class PubmedCollection(BaseDocumentCollection):
                 title,abstract,elem,position = queues[shardnumber].get()
                 if not elem: break
 
+                if elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Year') is not None:
+                    date = datetime.datetime(
+                        int(elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Year').text),
+                        int(elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Month').text),
+                        int(elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Day').text) if
+                        # some PubDate s miss the 'Day'
+                        elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Day') is not None else 1
+                    )
                 if elem.find('MedlineCitation/DateCompleted/Year') is not None:
                     date = datetime.datetime(
                         int(elem.find('MedlineCitation/DateCompleted/Year').text),
@@ -270,7 +278,8 @@ class PubmedCollection(BaseDocumentCollection):
                 else:
                     print('No date for',position)
                     continue #skipping entries without date
-
+                pmidversion = int(elem.find('MedlineCitation/PMID').get('Version'))
+                
                 # Prepare indexer writer
                 if not (commitCounter % commitLoop): writer = ix.writer()
                 commitCounter+=1 # this ensures that creating writer and committing occur in subsequent loops
@@ -283,20 +292,20 @@ class PubmedCollection(BaseDocumentCollection):
                     )
                 except sqlite3.IntegrityError:
                     prevpos = dbcursor.execute(
-                        'SELECT filepos,articlepos FROM abstracts WHERE pmid=?',(position[2],)
+                        'SELECT filepos,articlepos,version FROM abstracts WHERE pmid=?',(position[2],)
                     ).fetchone()
                     if prevpos[0] == position[0]:
                         if prevpos[1] == position[1]:
                             continue # abstract already indexed
-                        else:
-                            warnings.warn('same pmid ({}) in same file ({}) twice'.format(position[2],position[0]))
+                        elif prevpos[2] == pmidversion:
+                            warnings.warn('same versioned pmid ({}) in same file ({}) twice'.format(position[2],position[0]))
                     elif prevpos[0] > position[0]:
                         continue # has already been updated in a previous run
                     # should be case where update is required
-                    # TODO include SQL variable for updated records
                     dbcursor.execute(
-                        'UPDATE abstracts SET date=?, filepos=?, articlepos=? WHERE pmid=?',
-                        (date,position[0],position[1],position[2])
+                        'UPDATE abstracts SET date=?, filepos=?, articlepos=?, version=? WHERE pmid=?',
+                        # in current setup having a pmidversion of 1 in db indicates at least one update
+                        (date,position[0],position[1],pmidversion,position[2])
                     )
                     writer.delete_by_term('pmid', str(position[2]))
 
