@@ -117,7 +117,12 @@ class Ligsea(object):
         """
         import spacy
         if twosents: raise NotImplementedError
-        try: nlp = spacy.load('en')
+        try:
+            nlp = spacy.load('en')
+            # Prevent splitting intra-word hyphens
+            suffixes = nlp.Defaults.suffixes + (r'''\w+-\w+''',)
+            suffix_regex = spacy.util.compile_suffix_regex(suffixes)
+            nlp.tokenizer.suffix_search = suffix_regex.search
         except OSError:
             raise Exception(
                 '''spacy language module not installed.
