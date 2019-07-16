@@ -481,3 +481,9 @@ class PubmedCentralCollection(BaseDocumentCollection):
                     with open(localfilename,'wb') as fh:
                         ftp.retrbinary('RETR '+ filename, fh.write)
         ftp.close() #ftp.quit()
+
+    def process_documents(self):
+        raise NotImplementedError
+    
+    def filter_documents(self):
+        raise NotImplementedError
