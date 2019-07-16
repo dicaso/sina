@@ -259,7 +259,7 @@ class PubmedCollection(BaseDocumentCollection):
                     date = datetime.datetime(
                         int(elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Year').text),
                         int(elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Month').text) if
-                        elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Month') is not None else 1
+                        elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Month') is not None else 1,
                         int(elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Day').text) if
                         elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Day') is not None else 1
                         # some PubDate s miss the 'Month' and/or 'Day'
