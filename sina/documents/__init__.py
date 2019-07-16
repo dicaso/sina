@@ -314,7 +314,8 @@ class PubmedCollection(BaseDocumentCollection):
                 writer.add_document(
                     title=title,
                     pmid=elem.find('MedlineCitation/PMID').text,
-                    content=abstract,
+                    # Including the title in the content so it is also indexed searched
+                    content=title+(' ' if title.endswith('.') else '. ')+abstract,
                     date=date
                 )
                 if not (commitCounter % commitLoop):
