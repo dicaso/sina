@@ -447,3 +447,37 @@ class PubmedCollection(BaseDocumentCollection):
         locshelve.close()
         #conn.close()
         return articles
+
+class PubmedCentralCollection(BaseDocumentCollection):
+    """Example:
+
+    >>> pmc = PubmedCentralCollection('pubmedcentral','~/pubmedcentral')
+    >>> pmc.retrieve_documents()
+    """
+    def retrieve_documents(self):
+        import ftplib
+        from sina.config import secrets
+        ftplocations = [
+            '/pub/pmc/oa_bulk', # open access commercial and non-commercial use
+            '/pub/pmc/manuscript', # author manuscript collection
+            '/pub/pmc/historical_ocr', # historical ocr collection
+        ]
+        ftp = ftplib.FTP(
+            host='ftp.ncbi.nlm.nih.gov',
+            user='anonymous',
+            passwd=secrets.getsecret('email')
+        )
+        for ftplocation in ftplocations:
+            ftp.cwd(ftplocation)
+            filenames = ftp.nlst()
+            collection = os.path.basename(ftplocation)
+            if not os.path.exists(os.path.join(self.location,collection)):
+                os.mkdir(os.path.join(self.location,collection))
+            for filename in filenames:
+                localfilename = os.path.join(self.location,collection,filename)
+                # no md5 s at locations for pmc
+                if not os.path.exists(localfilename):
+                    print('Retrieving',filename)
+                    with open(localfilename,'wb') as fh:
+                        ftp.retrbinary('RETR '+ filename, fh.write)
+        ftp.close() #ftp.quit()
