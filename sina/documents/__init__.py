@@ -277,8 +277,7 @@ class PubmedCollection(BaseDocumentCollection):
                         int(elem.find('MedlineCitation/DateRevised/Day').text)
                     )
                 else:
-                    print('No date for',position)
-                    continue #skipping entries without date
+                    date = datetime.datetime(1,1,1) # Dummy date if no date available
                 pmidversion = int(elem.find('MedlineCitation/PMID').get('Version'))
                 
                 # Prepare indexer writer
@@ -459,6 +458,7 @@ class PubmedCentralCollection(BaseDocumentCollection):
         from sina.config import secrets
         ftplocations = [
             '/pub/pmc/oa_bulk', # open access commercial and non-commercial use
+            # PMID mapping file seems to be PMC-ids.csv.gz in /pub/pmc
             '/pub/pmc/manuscript', # author manuscript collection
             '/pub/pmc/historical_ocr', # historical ocr collection
         ]
@@ -474,6 +474,8 @@ class PubmedCentralCollection(BaseDocumentCollection):
             if not os.path.exists(os.path.join(self.location,collection)):
                 os.mkdir(os.path.join(self.location,collection))
             for filename in filenames:
+                if filename.endswith('.tmp'):
+                    continue # skip if retrieving while ncbi is making update
                 localfilename = os.path.join(self.location,collection,filename)
                 # no md5 s at locations for pmc
                 if not os.path.exists(localfilename):
