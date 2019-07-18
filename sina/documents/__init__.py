@@ -285,8 +285,7 @@ class PubmedCollection(BaseDocumentCollection):
                         int(elem.find('MedlineCitation/DateRevised/Day').text)
                     )
                 else:
-                    continue
-                    #date = datetime.datetime(1,1,1) # Dummy date if no date available
+                    date = datetime.datetime(1,1,1) # Dummy date if no date available
                 pmidversion = int(elem.find('MedlineCitation/PMID').get('Version'))
                 
                 # Prepare indexer writer
@@ -329,7 +328,7 @@ class PubmedCollection(BaseDocumentCollection):
                     title=title,
                     pmid=elem.find('MedlineCitation/PMID').text,
                     # Including the title in the content so it is also indexed searched
-                    content=title+(' ' if title.endswith('.') else '. ')+abstract,
+                    content=abstract,#title+(' ' if title.endswith('.') else '. ')+abstract,
                     date=date
                 )
                 if not (commitCounter % commitLoop):
