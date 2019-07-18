@@ -285,7 +285,8 @@ class PubmedCollection(BaseDocumentCollection):
                         int(elem.find('MedlineCitation/DateRevised/Day').text)
                     )
                 else:
-                    date = datetime.datetime(1,1,1) # Dummy date if no date available
+                    continue
+                    #date = datetime.datetime(1,1,1) # Dummy date if no date available
                 pmidversion = int(elem.find('MedlineCitation/PMID').get('Version'))
                 
                 # Prepare indexer writer
