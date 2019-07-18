@@ -219,7 +219,7 @@ class PubmedCollection(BaseDocumentCollection):
         def worker_function(shardnumber):
             from whoosh.index import create_in, open_dir
             from whoosh import fields
-            import datetime, sqlite3, warnings
+            import datetime, sqlite3, shelve, warnings
 
             schema = fields.Schema(
                 title=fields.TEXT(stored=True),
@@ -236,18 +236,19 @@ class PubmedCollection(BaseDocumentCollection):
             else:
                 ix = open_dir(os.path.join(indexdir,str(shardnumber)), schema=schema)
 
-            # create sqlite db
-            conn = sqlite3.connect(
-                os.path.join(indexdir,str(shardnumber),'pmid.db'),
-                detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES
-            )
-            dbcursor = conn.cursor()
-            if not(dbcursor.execute('SELECT name FROM sqlite_master WHERE type="table"').fetchone()):
-                # Create table if this is first connection
-                dbcursor.execute('''CREATE TABLE abstracts
-                    (pmid INTEGER PRIMARY KEY, version INTEGER, date TIMESTAMP, filepos INTEGER, articlepos INTEGER, xmlbytes INTEGER)'''
-                )
-                conn.commit()
+            # shelve <> for time issues avoiding create sqlite db
+            dbshelve = shelve.open(os.path.join(indexdir,str(shardnumber),'pmid.shelve'))
+            #conn = sqlite3.connect(
+            #    os.path.join(indexdir,str(shardnumber),'pmid.db'),
+            #    detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES
+            #)
+            #dbcursor = conn.cursor()
+            #if not(dbcursor.execute('SELECT name FROM sqlite_master WHERE type="table"').fetchone()):
+            #    # Create table if this is first connection
+            #    dbcursor.execute('''CREATE TABLE abstracts
+            #        (pmid INTEGER PRIMARY KEY, version INTEGER, date TIMESTAMP, filepos INTEGER, articlepos INTEGER, xmlbytes INTEGER)'''
+            #    )
+            #    conn.commit()
 
             commitCounter = 0
             commitLoop = 1000 #do a commit every 1000 document inserts
@@ -285,15 +286,20 @@ class PubmedCollection(BaseDocumentCollection):
                 commitCounter+=1 # this ensures that creating writer and committing occur in subsequent loops
                 
                 # Check if article has already been indexed or needs updating
-                try:
-                    dbcursor.execute(
-                        'INSERT INTO abstracts(pmid,date,filepos,articlepos) values (?,?,?,?)',
-                        (position[2],date,position[0],position[1])
-                    )
-                except sqlite3.IntegrityError:
-                    prevpos = dbcursor.execute(
-                        'SELECT filepos,articlepos,version FROM abstracts WHERE pmid=?',(position[2],)
-                    ).fetchone()
+                #try:
+                #    dbcursor.execute(
+                #        'INSERT INTO abstracts(pmid,date,filepos,articlepos) values (?,?,?,?)',
+                #        (position[2],date,position[0],position[1])
+                #    )
+                pmidstr = str(position[2])
+                if not pmidstr in dbshelve:
+                    dbshelve[pmidstr] = (position[0],position[1],None,date)
+                #except sqlite3.IntegrityError:
+                #    prevpos = dbcursor.execute(
+                #        'SELECT filepos,articlepos,version FROM abstracts WHERE pmid=?',(position[2],)
+                #    ).fetchone()
+                else:
+                    prevpos = dbshelve[pmidstr]
                     if prevpos[0] == position[0]:
                         if prevpos[1] == position[1]:
                             continue # abstract already indexed
@@ -302,11 +308,12 @@ class PubmedCollection(BaseDocumentCollection):
                     elif prevpos[0] > position[0]:
                         continue # has already been updated in a previous run
                     # should be case where update is required
-                    dbcursor.execute(
-                        'UPDATE abstracts SET date=?, filepos=?, articlepos=?, version=? WHERE pmid=?',
-                        # in current setup having a pmidversion of 1 in db indicates at least one update
-                        (date,position[0],position[1],pmidversion,position[2])
-                    )
+                    #dbcursor.execute(
+                    #    'UPDATE abstracts SET date=?, filepos=?, articlepos=?, version=? WHERE pmid=?',
+                    #    # in current setup having a pmidversion of 1 in db indicates at least one update
+                    #    (date,position[0],position[1],pmidversion,position[2])
+                    #)
+                    dbshelve[pmidstr] = (position[0],position[1],pmidversion,date)
                     writer.delete_by_term('pmid', str(position[2]))
 
                 # Indexer code
@@ -319,13 +326,14 @@ class PubmedCollection(BaseDocumentCollection):
                 )
                 if not (commitCounter % commitLoop):
                     writer.commit()
-                    conn.commit()
+                    #conn.commit()
             if (commitCounter % commitLoop):
                 # last commit if not committed in last loop
                 writer.commit()
-                conn.commit()
+                #conn.commit()
             ix.close()
-            conn.close()
+            #conn.close()
+            dbshelve.close()
 
         def commit_abstracts(title,abstract,elem,position):
             queues[position[2] % shards].put([title,abstract,elem,position])
