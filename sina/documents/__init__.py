@@ -250,6 +250,9 @@ class PubmedCollection(BaseDocumentCollection):
             #    )
             #    conn.commit()
 
+            import calendar
+            months = dict((v,k) for k,v in enumerate(calendar.month_abbr))
+
             commitCounter = 0
             commitLoop = 1000 #do a commit every 1000 document inserts
             while True:
@@ -257,10 +260,14 @@ class PubmedCollection(BaseDocumentCollection):
                 if not elem: break
 
                 if elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Year') is not None:
+                    # First get month as sometimes it is a number, sometimes 3 letters
+                    datemonth = elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Month')
+                    if datemonth is not None:
+                        datemonth = int(datemonth.text) if datemonth.text.isnumeric() else months[datemonth.text]
+                    else: datemonth = 1
                     date = datetime.datetime(
                         int(elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Year').text),
-                        int(elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Month').text) if
-                        elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Month') is not None else 1,
+                        datemonth,
                         int(elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Day').text) if
                         elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Day') is not None else 1
                         # some PubDate s miss the 'Month' and/or 'Day'
