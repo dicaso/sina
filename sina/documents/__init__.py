@@ -204,11 +204,12 @@ class PubmedCollection(BaseDocumentCollection):
             writer.commit()
         self.process_documents(commit_abstracts, onepass='.indexed_files.json')
 
-    def build_document_index_mp(self, shards=10):
+    def build_document_index_mp(self, shards=10, include_mesh=True):
         """Build an index for fast document retrieval with multiprocessing (one process/shard)
 
         shards (int): The number of document partitionings to use. Whoosh has memory issues
           for large indexes, this is a way around.
+        include_mesh (bool): Include mesh terms in shelve db.
         """
         import multiprocessing as mp
         queues = [mp.Queue(maxsize=1000) for i in range(shards)]
@@ -292,6 +293,13 @@ class PubmedCollection(BaseDocumentCollection):
                 else:
                     date = datetime.datetime(1,1,1) # Dummy date if no date available
                 pmidversion = int(elem.find('MedlineCitation/PMID').get('Version'))
+
+                # Extract mesh terms
+                if include_mesh:
+                    meshterms = [
+                        mh.find('DescriptorName').get('UI') #.text for the actual mesh concept
+                        for mh in elem.find('MedlineCitation/MeshHeadingList')
+                    ] if elem.find('MedlineCitation/MeshHeadingList') is not None else []
                 
                 # Prepare indexer writer
                 if not (commitCounter % commitLoop): writer = ix.writer()
@@ -305,7 +313,7 @@ class PubmedCollection(BaseDocumentCollection):
                 #    )
                 pmidstr = str(position[2])
                 if not pmidstr in dbshelve:
-                    dbshelve[pmidstr] = (position[0],position[1],None,date)
+                    dbshelve[pmidstr] = (position[0],position[1],None,date) + (meshterms if include_mesh else ())
                 #except sqlite3.IntegrityError:
                 #    prevpos = dbcursor.execute(
                 #        'SELECT filepos,articlepos,version FROM abstracts WHERE pmid=?',(position[2],)
@@ -325,7 +333,7 @@ class PubmedCollection(BaseDocumentCollection):
                     #    # in current setup having a pmidversion of 1 in db indicates at least one update
                     #    (date,position[0],position[1],pmidversion,position[2])
                     #)
-                    dbshelve[pmidstr] = (position[0],position[1],pmidversion,date)
+                    dbshelve[pmidstr] = (position[0],position[1],pmidversion,date) + (meshterms if include_mesh else ())
                     writer.delete_by_term('pmid', str(position[2]))
 
                 # Indexer code
