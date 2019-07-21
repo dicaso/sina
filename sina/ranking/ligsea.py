@@ -116,9 +116,13 @@ class Ligsea(object):
               TODO not implemented yet
         """
         import spacy
+        from scispacy.abbreviation import AbbreviationDetector
         if twosents: raise NotImplementedError
         try:
-            nlp = spacy.load('en')
+            nlp = spacy.load('en') #en_ner_craft_md
+            # Detect abbreviations
+            abbreviation_pipe = AbbreviationDetector(nlp)
+            nlp.add_pipe(abbreviation_pipe)
             # Prevent splitting intra-word hyphens
             suffixes = nlp.Defaults.suffixes + (r'''\w+-\w+''',)
             suffix_regex = spacy.util.compile_suffix_regex(suffixes)
@@ -127,7 +131,7 @@ class Ligsea(object):
             raise Exception(
                 '''spacy language module not installed.
                 Run: python -m spacy download en
-                '''
+                ''' # pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.2.0/en_ner_craft_md-0.2.0.tar.gz
             )
         self.gene_association = {}
         self.gene_association_sents = {}

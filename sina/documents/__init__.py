@@ -103,7 +103,7 @@ class PubmedCollection(BaseDocumentCollection):
         self.retrieve_documents(check_md5=True)
         self.retrieve_documents(ftplocation='pubmed/updatefiles',check_md5=True)
 
-    def process_documents(self,callback,*args,verbose=False,progress=True,onepass=False,**kwargs):
+    def process_documents(self,callback,*args,verbose=False,progress=True,onepass=False,limit=None,**kwargs):
         """process documents with a callback function
         
         Args:
@@ -114,9 +114,13 @@ class PubmedCollection(BaseDocumentCollection):
             onepass (str): if a str is given, it will track wich documents have already been
               processed with the callback and skip them. It is up to the developer to provide
               a suitable filename that will be used for the tracking.
+            limit (int): if limit takes a random sample of the xmlfilenames for testing purposes.
         """
         import hashlib, json
         xmlfilenames = glob.glob(os.path.join(self.location,'*.xml.gz'))
+        if limit:
+            import random
+            xmlfilenames = random.sample(xmlfilenames, limit)
         totalxmlfiles = len(xmlfilenames)
         article_pos = 0
         if onepass:
@@ -204,12 +208,13 @@ class PubmedCollection(BaseDocumentCollection):
             writer.commit()
         self.process_documents(commit_abstracts, onepass='.indexed_files.json')
 
-    def build_document_index_mp(self, shards=10, include_mesh=True):
+    def build_document_index_mp(self, shards=10, include_mesh=True, limit=None):
         """Build an index for fast document retrieval with multiprocessing (one process/shard)
 
         shards (int): The number of document partitionings to use. Whoosh has memory issues
           for large indexes, this is a way around.
         include_mesh (bool): Include mesh terms in shelve db.
+        limit (int): If limit, stop indexing after limit number for testing.
         """
         import multiprocessing as mp
         queues = [mp.Queue(maxsize=1000) for i in range(shards)]
@@ -363,7 +368,7 @@ class PubmedCollection(BaseDocumentCollection):
         processes = [mp.Process(target=worker_function,args=(i,)) for i in range(shards)]
         for p in processes: p.start()
         # Build index
-        self.process_documents(commit_abstracts, onepass='.indexed_files.json')
+        self.process_documents(commit_abstracts, onepass='.indexed_files.json', limit=limit)
         # Wait for all workers to finish
         for q in queues: q.put([None,None,None,None]) # putting stop signal in each queue
         for p in processes: p.join()
