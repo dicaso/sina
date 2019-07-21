@@ -250,8 +250,13 @@ class PubmedCollection(BaseDocumentCollection):
             #    )
             #    conn.commit()
 
-            import calendar
-            months = dict((v,k) for k,v in enumerate(calendar.month_abbr))
+            import calendar, locale
+            locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
+            # for available settings see $ locale -a
+            # if en_US.UTF-8 this will fail
+            months = dict(
+                (v,k) for k,v in list(enumerate(calendar.month_abbr))+list(enumerate(calendar.month_name))
+            )
 
             commitCounter = 0
             commitLoop = 1000 #do a commit every 1000 document inserts
