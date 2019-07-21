@@ -313,7 +313,7 @@ class PubmedCollection(BaseDocumentCollection):
                 #    )
                 pmidstr = str(position[2])
                 if not pmidstr in dbshelve:
-                    dbshelve[pmidstr] = (position[0],position[1],None,date) + (meshterms if include_mesh else ())
+                    dbshelve[pmidstr] = (position[0],position[1],None,date) + ((meshterms,) if include_mesh else ())
                 #except sqlite3.IntegrityError:
                 #    prevpos = dbcursor.execute(
                 #        'SELECT filepos,articlepos,version FROM abstracts WHERE pmid=?',(position[2],)
@@ -333,7 +333,7 @@ class PubmedCollection(BaseDocumentCollection):
                     #    # in current setup having a pmidversion of 1 in db indicates at least one update
                     #    (date,position[0],position[1],pmidversion,position[2])
                     #)
-                    dbshelve[pmidstr] = (position[0],position[1],pmidversion,date) + (meshterms if include_mesh else ())
+                    dbshelve[pmidstr] = (position[0],position[1],pmidversion,date) + ((meshterms,) if include_mesh else ())
                     writer.delete_by_term('pmid', str(position[2]))
 
                 # Indexer code
