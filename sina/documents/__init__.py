@@ -154,7 +154,7 @@ class PubmedCollection(BaseDocumentCollection):
                         root.clear() # ensures only one article is kept in memory
                         # but because of the 'clear' you cannot use the root for info on
                         # current iterated PubmedArticle element
-            if progress: print(end='\rProgress (%): {:.4f}'.format(xmli/totalxmlfiles)*100)
+            if progress: print(end='\rProgress (%): {:.4f}'.format((xmli+1)/totalxmlfiles)*100)
             if onepass: processedFiles.add(os.path.basename(xmlfilename))
         if onepass:
             json.dump(list(processedFiles), open(os.path.join(self.location, onepass),'wt'))
@@ -390,7 +390,7 @@ class PubmedCollection(BaseDocumentCollection):
         print()
         for indexdir in range(total_idirs):
             indexdir = os.path.join(self.location,'.index',str(indexdir))
-            print('\rProcessing shard %s/%s' % (os.path.basename(indexdir),total_idirs), end='')
+            print('\rProcessing shard %s/%s' % (os.path.basename(indexdir),total_idirs-1), end='')
             ix = index.open_dir(indexdir)
             query = QueryParser("content", ix.schema).parse(querystr)
             with ix.searcher() as searcher:
@@ -522,3 +522,32 @@ class PubmedCentralCollection(BaseDocumentCollection):
     
     def filter_documents(self):
         raise NotImplementedError
+
+class PubmedQueryResult(object):
+    """Result from a Pubmed index query
+    Methods for processing the result
+    """
+    def __init__(self, corpus, results):
+        self.results = results
+        self.corpus = corpus
+
+    def analyze_mesh(self,topfreqs=20):
+        from collections import Counter
+        import shelve, pandas as pd
+        shards = glob.glob(os.path.join(self.corpus.location,'.index/*'))
+        lenshards = len(shards)
+        pmiddbs = [
+            shelve.open(os.path.join(self.corpus.location,'.index',str(i),'pmid.shelve')) for i in range(lenshards)
+        ]
+        self.meshterms = [pmiddbs[int(r['pmid'])%lenshards][r['pmid']][4] for r in self.results]
+        self.meshfreqs = Counter((mt for a in self.meshterms for mt in a))
+
+        # Filter top
+        self.meshtop = self.meshfreqs.most_common(topfreqs)
+        self.topfreqs = topfreqs
+        
+        meshtop_ix = pd.Index([mt for mt,f in self.meshtop])
+        self.meshtabel = pd.DataFrame(
+            {r['pmid']:meshtop_ix.isin(self.meshterms[i]) for i,r in enumerate(self.results)}
+        ).T
+        

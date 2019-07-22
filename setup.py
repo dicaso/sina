@@ -17,6 +17,7 @@ setup(name = 'sina',
           'pymongo',
           'whoosh',
           'spacy',
+          'scispacy',
           'textacy',
           'flask',
           'keras', #requires backend installed such as tensorflow
