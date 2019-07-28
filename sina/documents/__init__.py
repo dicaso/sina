@@ -278,14 +278,18 @@ class PubmedCollection(BaseDocumentCollection):
                     if datemonth is not None:
                         datemonth = int(datemonth.text) if datemonth.text.isnumeric() else months[datemonth.text]
                     else: datemonth = 1
-                    date = datetime.datetime(
+                    try: date = datetime.datetime(
                         int(elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Year').text),
                         datemonth,
                         int(elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Day').text) if
                         elem.find('MedlineCitation/Article/Journal/JournalIssue/PubDate/Day') is not None else 1
                         # some PubDate s miss the 'Month' and/or 'Day'
                     )
-                if elem.find('MedlineCitation/DateCompleted/Year') is not None:
+                    except ValueError as e:
+                        # Only catching ValueError here, MedlineCitation dates should be curated by pubmed
+                        print(position,e)
+                        date = datetime.datetime(1,1,1)
+                elif elem.find('MedlineCitation/DateCompleted/Year') is not None:
                     date = datetime.datetime(
                         int(elem.find('MedlineCitation/DateCompleted/Year').text),
                         int(elem.find('MedlineCitation/DateCompleted/Month').text),
