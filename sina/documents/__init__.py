@@ -117,7 +117,9 @@ class PubmedCollection(BaseDocumentCollection):
             limit (int): if limit takes a random sample of the xmlfilenames for testing purposes.
         """
         import hashlib, json
-        xmlfilenames = glob.glob(os.path.join(self.location,'*.xml.gz'))
+        xmlfilenames = sorted(
+            glob.glob(os.path.join(self.location,'*.xml.gz'))
+        )
         if limit:
             import random
             xmlfilenames = random.sample(xmlfilenames, limit)
@@ -425,7 +427,9 @@ class PubmedCollection(BaseDocumentCollection):
         The last entry of an article will overwrite the earlier version.
         """
         import re, shelve#, sqlite3
-        xmlfilenames = glob.glob(os.path.join(self.location,'*.xml.gz'))
+        xmlfilenames = sorted(
+            glob.glob(os.path.join(self.location,'*.xml.gz'))
+        )
         articlere = re.compile(b'<PubmedArticle>.+?</PubmedArticle>', re.MULTILINE | re.DOTALL)
         pmidre = re.compile(b'<PMID.+?>(\d+)</PMID>')
         locshelve = shelve.open(os.path.join(self.location,'pmid_locations.shelve'))
@@ -528,18 +532,19 @@ class PubmedQueryResult(object):
     Methods for processing the result
     """
     def __init__(self, corpus, results):
-        self.results = results
+        import pandas as pd
+        self.results = pd.DataFrame(results).set_index('pmid')
         self.corpus = corpus
 
     def analyze_mesh(self,topfreqs=20):
         from collections import Counter
         import shelve, pandas as pd
-        shards = glob.glob(os.path.join(self.corpus.location,'.index/*'))
+        shards = sorted(glob.glob(os.path.join(self.corpus.location,'.index/*')))
         lenshards = len(shards)
         pmiddbs = [
             shelve.open(os.path.join(self.corpus.location,'.index',str(i),'pmid.shelve')) for i in range(lenshards)
         ]
-        self.meshterms = [pmiddbs[int(r['pmid'])%lenshards][r['pmid']][4] for r in self.results]
+        self.meshterms = [pmiddbs[int(pmid)%lenshards][pmid][4] for pmid in self.results.index]
         self.meshfreqs = Counter((mt for a in self.meshterms for mt in a))
 
         # Filter top
@@ -548,6 +553,47 @@ class PubmedQueryResult(object):
         
         meshtop_ix = pd.Index([mt for mt,f in self.meshtop])
         self.meshtabel = pd.DataFrame(
-            {r['pmid']:meshtop_ix.isin(self.meshterms[i]) for i,r in enumerate(self.results)}
+            {pmid:meshtop_ix.isin(self.meshterms[i]) for i,pmid in enumerate(self.results.index)}
         ).T
+        self.meshtabel['mtindexsum'] = self.meshtabel.sum(axis=1)
+        self.meshtabel.sort_values('mtindexsum',ascending=False,inplace=True)
+        del self.meshtabel['mtindexsum']
         
+    def sentence_embedding(self, test_size=.2, random_state=None):
+        import pandas as pd
+        from sklearn.model_selection import train_test_split
+        from keras.models import Sequential
+        from keras.layers import Dense
+        
+        # Align meshtabel and results index as to place
+        # meshtabel value lists in results dataframe
+        self.meshtabel.sort_index(inplace=True)
+        self.results.sort_index(inplace=True)
+        self.results['meshterms'] = list(self.meshtabel.values)
+        self.results['meshsum'] = self.results.meshterms.apply(sum)
+        self.results['domainspec'] = self.results.meshsum > self.results.meshsum.median()
+        
+        # Split train/test
+        X_train, X_test, y_train, y_test = train_test_split(
+            self.results.title, self.results.domainspec,
+            test_size=test_size, random_state=random_state
+        )
+        
+        model = Sequential()
+        model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+        model.summary()
+        
+    def gensim_topics(self):
+        import gensim
+        import spacy
+        nlp = spacy.load('en')
+        corpus = [
+            [token.lemma_.lower() for token in nlp(c) if not (token.is_stop or token.is_punct)]
+            for c in qr.results.content
+        ]
+        dictionary = gensim.corpora.Dictionary(corpus)
+        corpus = [dictionary.doc2bow(c) for c in corpus]
+        ldamodel = gensim.model.LdaModel(
+            corpus=corpus, num_topics=10, id2word=dictionary, iterations=100
+        )
+        return ldamodel
