@@ -591,13 +591,52 @@ class PubmedQueryResult(object):
         import gensim
         import spacy
         nlp = spacy.load('en')
+        #nlp = spacy.load('en', disable=['ner', 'parser']) # disabling NER and POS tagging for speed
         corpus = [
             [token.lemma_.lower() for token in nlp(c) if not (token.is_stop or token.is_punct)]
-            for c in qr.results.content
+            for c in self.results.content
         ]
         dictionary = gensim.corpora.Dictionary(corpus)
-        corpus = [dictionary.doc2bow(c) for c in corpus]
-        ldamodel = gensim.model.LdaModel(
-            corpus=corpus, num_topics=10, id2word=dictionary, iterations=100
+        corpus_bow = [dictionary.doc2bow(c) for c in corpus]
+        ldamodel = gensim.models.LdaModel(
+            corpus=corpus_bow, num_topics=10, id2word=dictionary, iterations=100
         )
         return ldamodel
+
+    def gensim_sentence_processing(self, bigrams=True):
+        import spacy
+        nlp = spacy.load('en', disable=['ner', 'parser'])
+        sentences = [
+            [token.lemma_.lower() for token in sent if not (token.is_stop or token.is_punct)]
+            for txt in self.results.content for sent in nlp(txt).sents
+        ]
+        if bigrams:
+            bigram = gensim.models.Phrases(sentences, min_count=30, progress_per=10000)
+            sentences = [bigram[sent] for sent in sentences]
+        w2model = gensim.models.word2vec.Word2Vec(sentences, size=200, hs=1)
+        
+        # visualize
+        import matplotlib.pyplot as plt
+        from sklearn.decomposition import PCA
+        from sklearn.manifold import TSNE
+        # Get 100 most frequent words
+        top100words = w2model.wv.index2entity[:100]
+        top100vectors = w2model.wv[top100words]
+
+        # Reduce with PCA dimensionality as tSNE does not scale well
+        top100vectors_reduc = PCA(n_components=50).fit_transform(top100vectors)
+        Y = TSNE(n_components=2, random_state=0, perplexity=15).fit_transform(top100vectors_reduc)
+
+        # Plot
+        fig, ax = plt.subplots()
+        ax.scatter(Y[:,0], Y[:,1])
+        for word, vec in zip(top100words, Y):
+            ax.text(vec[0], vec[1],
+                 word.title(),
+                 horizontalalignment='left',
+                 verticalalignment='bottom',
+                 size='medium',
+            ).set_size(15)
+
+        return w2model
+        

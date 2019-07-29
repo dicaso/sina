@@ -16,10 +16,11 @@ setup(name = 'sina',
           'bidali',
           'pymongo',
           'whoosh',
+          'flask',
           'spacy',
           'scispacy',
           'textacy',
-          'flask',
+          'gensim',
           'keras', #requires backend installed such as tensorflow
           'GEOparse' #GEOquery inspired python package
       ],
