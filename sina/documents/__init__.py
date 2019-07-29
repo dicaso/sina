@@ -161,56 +161,7 @@ class PubmedCollection(BaseDocumentCollection):
         if onepass:
             json.dump(list(processedFiles), open(os.path.join(self.location, onepass),'wt'))
 
-    def build_document_index(self, shards=10):
-        """Build an index for fast document retrieval
-
-        shards (int): The number of document partitionings to use. Whoosh has memory issues
-          for large indexes, this is a way around.
-        """
-        from whoosh.index import create_in, open_dir
-        from whoosh import fields
-        schema = fields.Schema(
-            title=fields.TEXT(stored=True),
-            pmid=fields.ID(stored=True),
-            content=fields.TEXT(stored=True),
-            date=fields.DATETIME(stored=True),
-            #filepos=fields.INT(),
-            #articlepos=fields.INT()
-        )
-        indexdir = os.path.join(self.location,'.index')
-        if not os.path.exists(indexdir):
-            os.mkdir(indexdir)
-        ix = []
-        for iix in range(shards):
-            if not os.path.exists(os.path.join(indexdir,str(iix))):
-                os.mkdir(os.path.join(indexdir,str(iix)))
-                ix.append(create_in(os.path.join(indexdir,str(iix)), schema))
-            else: ix.append(open_dir(os.path.join(indexdir,str(iix)), schema=schema))
-        def commit_abstracts(title,abstract,elem,position):
-            import datetime
-            if elem.find('MedlineCitation/DateCompleted/Year') is not None:
-                date = datetime.datetime(
-                    int(elem.find('MedlineCitation/DateCompleted/Year').text),
-                    int(elem.find('MedlineCitation/DateCompleted/Month').text),
-                    int(elem.find('MedlineCitation/DateCompleted/Day').text)
-                )
-            else:
-                date = datetime.datetime(
-                    int(elem.find('MedlineCitation/DateRevised/Year').text),
-                    int(elem.find('MedlineCitation/DateRevised/Month').text),
-                    int(elem.find('MedlineCitation/DateRevised/Day').text)
-                )
-            writer = ix[position[2] % 10].writer() #make this position[0]*position[1] to redistribute
-            writer.add_document(
-                title=title,
-                pmid=elem.find('MedlineCitation/PMID').text,
-                content=abstract,
-                date=date
-            )
-            writer.commit()
-        self.process_documents(commit_abstracts, onepass='.indexed_files.json')
-
-    def build_document_index_mp(self, shards=10, include_mesh=True, limit=None):
+    def build_document_index(self, shards=10, include_mesh=True, limit=None):
         """Build an index for fast document retrieval with multiprocessing (one process/shard)
 
         shards (int): The number of document partitionings to use. Whoosh has memory issues
