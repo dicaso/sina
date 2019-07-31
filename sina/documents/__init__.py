@@ -554,17 +554,37 @@ class PubmedQueryResult(object):
         )
         return ldamodel
 
-    def gensim_sentence_processing(self, bigrams=True):
-        import spacy
+    def gensim_w2v(self, vecsize=100, bigrams=True, split_hyphens=False):
+        """Build word2vec model with gensim
+        
+        Args:
+          vecsize (int): Size of the embedding vectors
+          bigrams (bool|int): if True or 1 build bigram, if 2 build trigram, etc
+          split_hyphens (bool): split hyphened words into subtokens
+        """
+        import spacy, gensim
         nlp = spacy.load('en', disable=['ner', 'parser'])
+        nlp.add_pipe(nlp.create_pipe('sentencizer'))
+        if not split_hyphens:
+            # Prevent splitting intra-word hyphens
+            suffixes = nlp.Defaults.suffixes + (r'''\w+-\w+''',)
+            suffix_regex = spacy.util.compile_suffix_regex(suffixes)
+            nlp.tokenizer.suffix_search = suffix_regex.search
         sentences = [
-            [token.lemma_.lower() for token in sent if not (token.is_stop or token.is_punct)]
+            [
+            token.lemma_.lower() for token in sent
+            if not (token.is_stop or token.is_punct or token.is_digit)
+            ]
             for txt in self.results.content for sent in nlp(txt).sents
         ]
-        if bigrams:
-            bigram = gensim.models.Phrases(sentences, min_count=30, progress_per=10000)
+        while bigrams:
+            bigrams-=1 # for trigram set bigrams=2
+            bigram = gensim.models.Phrases(
+                sentences, min_count=30, progress_per=10000,
+                delimiter=chr(183).encode() # interpunct aka &middot; as delimiter
+            )
             sentences = [bigram[sent] for sent in sentences]
-        w2model = gensim.models.word2vec.Word2Vec(sentences, size=200, hs=1)
+        w2model = gensim.models.word2vec.Word2Vec(sentences, size=vecsize, hs=1)
         
         # visualize
         import matplotlib.pyplot as plt
@@ -575,7 +595,7 @@ class PubmedQueryResult(object):
         top100vectors = w2model.wv[top100words]
 
         # Reduce with PCA dimensionality as tSNE does not scale well
-        top100vectors_reduc = PCA(n_components=50).fit_transform(top100vectors)
+        top100vectors_reduc = PCA(n_components=50).fit_transform(top100vectors) if vecsize > 50 else top100vectors
         Y = TSNE(n_components=2, random_state=0, perplexity=15).fit_transform(top100vectors_reduc)
 
         # Plot
@@ -590,4 +610,99 @@ class PubmedQueryResult(object):
             ).set_size(15)
 
         return w2model
+
+    @staticmethod
+    def embedding_projection(emb1, emb2, topvoc_emb2=None, test_similarity=False, custom=True):
+        """Get embedding projection from one embedding to another
         
+        Args:
+          emb1 (gensim.models.word2vec.Word2Vec): Reference embedding
+          emb2 (gensim.models.word2vec.Word2Vec): Target embedding
+          topvoc_emb2 (int): If given restrict reference words to topwords
+            of target embedding
+          test_similarity (bool): Test the cosine similarity
+          custom (bool): Custom numpy algorithm for projection
+
+        Returns: 
+          projection function, that takes a word from emb1 and returns
+          its vector in emb2
+
+        Example:
+        >>> pmc = PubmedCollection('pubmed','~/pubmed'
+        >>> emb1 = PubmedQueryResult(
+        ...   results=pmc.query_document_index('neuroblastoma OR cancer'),corpus=pmc
+        ... ).gensim_w2v()
+        >>> emb2 = PubmedQueryResult(
+        ...   results=pmc.query_document_index('neuroblastoma'),corpus=pmc
+        ... ).gensim_w2v()
+        >>> PubmedQueryResult.embedding_projection(emb1, emb2)
+        """
+        import gensim, numpy as np, random
+        emb2vocab = list(emb2.wv.vocab)[:topvoc_emb2] if topvoc_emb2 else emb2.wv.vocab
+
+        # Allows projecting known words from emb1 into emb2 even if unkown
+        if custom:
+            commonwords = list(set(emb1.wv.vocab)&set(emb2vocab))
+            sourcevec = emb1.wv[commonwords]
+            targetvec = emb2.wv[commonwords]
+            n, dim = targetvec.shape
+            centeredS = sourcevec - sourcevec.mean(axis=0)
+            centeredT = targetvec - targetvec.mean(axis=0)
+            C = np.dot(np.transpose(centeredS), centeredT) / n
+            V,S,W = np.linalg.svd(C)
+            d = (np.linalg.det(V) * np.linalg.det(W)) < 0.0
+            if d:
+                S[-1] = -S[-1]
+                V[:, -1] = -V[:, -1]
+            R = np.dot(V, W)
+            varS = np.var(sourcevec, axis=0).sum()
+            c = 1/varS * np.sum(S) # scale factor
+            t = targetvec.mean(axis=0) - sourcevec.mean(axis=0).dot(c*R)
+            #np.allclose(sourcevec.dot(c*R) + t, targetvec)
+            err = ((sourcevec.dot(c * R) + t - targetvec) ** 2).sum()
+            print('Error on training points:', err)
+            projfunc = lambda x: emb1.wv[x].dot(c * R) + t
+        else:
+            commonwords = [(w,w) for w in set(emb1.wv.vocab)&set(emb2vocab)]
+            transmat = gensim.models.translation_matrix.TranslationMatrix(emb1.wv, emb2.wv)
+            transmat.train(commonwords)
+            # emb2.wv.similar_by_vector(np.dot(transmat.translation_matrix,emb1.wv['cyclin-dependent']),topn=3)
+            # ==
+            # transmat.translate(['cyclin-dependent'], topn=3)
+            projfunc = lambda x: np.dot(transmat.translation_matrix,emb1.wv[x])
+
+        if test_similarity and topvoc_emb2:
+            # For the moment only sensible to test if restricting reference points emb2
+            from scipy import spatial
+            import matplotlib.pyplot as plt
+            from sklearn.decomposition import PCA
+            controlset = random.sample(list(emb2.wv.vocab)[topvoc_emb2:],topvoc_emb2)
+            trained_cosines = [
+                spatial.distance.cosine(projfunc(w), emb2.wv[w])
+                for w in emb2vocab if w in emb1.wv.vocab
+            ]
+            control_cosines = [
+                spatial.distance.cosine(projfunc(w), emb2.wv[w])
+                for w in controlset if w in emb1.wv.vocab
+            ]
+            print(
+                'Avg+std trained cosine sim:', np.mean(trained_cosines), np.std(trained_cosines),
+                ', avg+std control cosine sim:', np.mean(control_cosines), np.std(control_cosines)
+            )
+
+            # Plotting
+            pca = PCA(n_components=2).fit(emb2.wv[emb2.wv.index2entity])
+            fig, ax = plt.subplots()
+            Y = pca.transform(emb2.wv[emb2vocab])
+            Y_projection = pca.transform(
+                np.stack([projfunc(w) for w in emb2vocab if w in emb1.wv.vocab])
+            )
+            ax.scatter(Y[:,0], Y[:,1], label='original')
+            ax.scatter(Y_projection[:,0], Y_projection[:,1], label='projection')
+            for word, vec in list(zip(emb2vocab, Y))+list(zip(emb2vocab, Y_projection)):
+                ax.text(vec[0], vec[1],
+                    word.title(),
+                ).set_size(15)
+            ax.legend()
+            
+        return projfunc
