@@ -123,6 +123,7 @@ class Ligsea(object):
             # Detect abbreviations
             abbreviation_pipe = AbbreviationDetector(nlp)
             nlp.add_pipe(abbreviation_pipe)
+            nlp.add_pipe(nlp.create_pipe('sentencizer'))
             # Prevent splitting intra-word hyphens
             suffixes = nlp.Defaults.suffixes + (r'''\w+-\w+''',)
             suffix_regex = spacy.util.compile_suffix_regex(suffixes)
