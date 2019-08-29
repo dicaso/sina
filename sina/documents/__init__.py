@@ -485,13 +485,25 @@ class PubmedCentralCollection(BaseDocumentCollection):
 class PubmedQueryResult(object):
     """Result from a Pubmed index query
     Methods for processing the result
+
+    Args:
+      corpus (PubmedCollection): Pubmed corpus that provided results.
+      results (list): Document result set.
+      test_fraction (float): If provided a random subset equaling test_fraction
+        is set apart for testing purposes after machine learning tasks downstream.
     """
-    def __init__(self, corpus, results):
+    def __init__(self, corpus, results, test_fraction=.25):
         import pandas as pd
         self.results = pd.DataFrame(results).set_index('pmid')
         self.corpus = corpus
+        if test_fraction:
+            from sklearn.model_selection import train_test_split
+            self.results, self.results_test = train_test_split(self.results, test_size=test_fraction)
+            self.testset = True
+        else: self.testset = False
 
-    def analyze_mesh(self,topfreqs=20):
+    def analyze_mesh(self,topfreqs=20,getmeshnames=False):
+        # wget ftp://nlmpubs.nlm.nih.gov/online/mesh/MESH_FILES/xmlmesh/desc2019.gz
         from collections import Counter
         import shelve, pandas as pd
         shards = sorted(glob.glob(os.path.join(self.corpus.location,'.index/*')))
@@ -500,21 +512,92 @@ class PubmedQueryResult(object):
             shelve.open(os.path.join(self.corpus.location,'.index',str(i),'pmid.shelve')) for i in range(lenshards)
         ]
         self.meshterms = [pmiddbs[int(pmid)%lenshards][pmid][4] for pmid in self.results.index]
+        if self.testset:
+            self.meshterms_test = [pmiddbs[int(pmid)%lenshards][pmid][4] for pmid in self.results_test.index]
         self.meshfreqs = Counter((mt for a in self.meshterms for mt in a))
 
         # Filter top
-        self.meshtop = self.meshfreqs.most_common(topfreqs)
+        self.meshtop = pd.DataFrame(
+            self.meshfreqs.most_common(topfreqs),
+            columns=['meshid','freq']
+        )
         self.topfreqs = topfreqs
+        if getmeshnames:
+            import gzip, xml.etree.ElementTree as ET
+            with gzip.open('/home/mint/LSData/private/desc2019.gz') as xmlfilehandle:
+                xml = ET.parse(xmlfilehandle)
+                root = xml.getroot()
+                self.meshtop['meshname'] = self.meshtop.meshid.apply(
+                    lambda x: root.find(
+                        "DescriptorRecord[DescriptorUI='{}']/DescriptorName/String".format(x)
+                        ).text
+                )
+                del xml, root
         
-        meshtop_ix = pd.Index([mt for mt,f in self.meshtop])
+        meshtop_ix = pd.Index(self.meshtop.meshid)
         self.meshtabel = pd.DataFrame(
             {pmid:meshtop_ix.isin(self.meshterms[i]) for i,pmid in enumerate(self.results.index)}
         ).T
         self.meshtabel['mtindexsum'] = self.meshtabel.sum(axis=1)
         self.meshtabel.sort_values('mtindexsum',ascending=False,inplace=True)
         del self.meshtabel['mtindexsum']
+        if self.testset:
+            self.meshtabel_test = pd.DataFrame(
+                {pmid:meshtop_ix.isin(self.meshterms_test[i]) for i,pmid in enumerate(self.results_test.index)}
+            ).T
+
+    def predict_meshterms(self, only_freqs=False):
+        import numpy as np
+        from sklearn import svm, naive_bayes, metrics
+        #from gensim.corpora import Dictionary
+        #from gensim.models import TfidfModel
+        # Transform text
+        #embedding = self.gensim_w2v(doclevel=True)
+        #dct = Dictionary(self.processed_documents)
+        #dct.id2token = {v: k for k, v in dct.token2id.items()}
+        #corpus = [dct.doc2bow(line) for line in self.processed_documents]
+        #model = TfidfModel(corpus)
+        #X = [
+        #    [
+        #        (i,np.append(
+        #            embedding.wv[dct.id2token[i]] if dct.id2token[i] in embedding.wv else np.zeros(embedding.wv.vector_size),
+        #            f
+        #        )) for i,f in model[doc]
+        #    ]
+        #    for doc in corpus
+        #]
+        # Prepare data
+        X = np.vstack(
+            [self.normalize_text_length(doc, only_freqs) for doc in self.processed_documents]
+        )
+        X_test = np.vstack(
+            [self.normalize_text_length(doc, only_freqs) for doc in self.processed_documents_test]
+        )
+        Y = self.meshtabel.values
+        Y_test = self.meshtabel_test.values
+
+        # ML model
+        self.models = []
+        accuracies = []
+        precisions = []
+        recalls = []
+        for i in range(Y.shape[1]):
+            #model = naive_bayes.GaussianNB()
+            model = svm.SVC(kernel='rbf', class_weight='balanced', gamma='scale')
+            model.fit(X, Y[:,i])
+            Y_test_pred = model.predict(X_test)
+            accuracies.append(metrics.accuracy_score(Y_test[:,i], Y_test_pred))
+            precisions.append(metrics.precision_score(Y_test[:,i], Y_test_pred))
+            recalls.append(metrics.recall_score(Y_test[:,i], Y_test_pred))
+            print(i, accuracies[-1])
+            self.models.append(model)
+        self.meshtop['pred_acc'] = accuracies
+        self.meshtop['pred_prec'] = precisions
+        self.meshtop['pred_rec'] = recalls
+        self.X, self.X_test, self.Y, self.Y_test = X, X_test, Y, Y_test
         
     def sentence_embedding(self, test_size=.2, random_state=None):
+        """WORK IN PROGRESS"""
         import pandas as pd
         from sklearn.model_selection import train_test_split
         from keras.models import Sequential
@@ -554,13 +637,14 @@ class PubmedQueryResult(object):
         )
         return ldamodel
 
-    def gensim_w2v(self, vecsize=100, bigrams=True, split_hyphens=False):
+    def gensim_w2v(self, vecsize=100, bigrams=True, split_hyphens=False, doclevel=False):
         """Build word2vec model with gensim
         
         Args:
           vecsize (int): Size of the embedding vectors
           bigrams (bool|int): if True or 1 build bigram, if 2 build trigram, etc
           split_hyphens (bool): split hyphened words into subtokens
+          doclevel (bool): also process document level with sentence processing
         """
         import spacy, gensim
         nlp = spacy.load('en', disable=['ner', 'parser'])
@@ -577,6 +661,22 @@ class PubmedQueryResult(object):
             ]
             for txt in self.results.content for sent in nlp(txt).sents
         ]
+        if doclevel:
+            self.processed_documents = [
+                [
+                token.lemma_.lower() for sent in nlp(txt).sents for token in sent
+                if not (token.is_stop or token.is_punct or token.is_digit)
+                ]
+                for txt in self.results.content
+            ]
+            if self.testset:
+                self.processed_documents_test = [
+                    [
+                    token.lemma_.lower() for sent in nlp(txt).sents for token in sent
+                    if not (token.is_stop or token.is_punct or token.is_digit)
+                    ]
+                    for txt in self.results_test.content
+                ]
         while bigrams:
             bigrams-=1 # for trigram set bigrams=2
             bigram = gensim.models.Phrases(
@@ -584,6 +684,13 @@ class PubmedQueryResult(object):
                 delimiter=chr(183).encode() # interpunct aka &middot; as delimiter
             )
             sentences = [bigram[sent] for sent in sentences]
+            if doclevel:
+                self.processed_documents = [bigram[doc] for doc in self.processed_documents]
+                if self.testset:
+                    self.processed_documents_test = [bigram[doc] for doc in self.processed_documents_test]
+        # todo put this code for processing sentences in function so it can also
+        # be reused for classification
+        self.processed_sentences = sentences
         w2model = gensim.models.word2vec.Word2Vec(sentences, size=vecsize, hs=1)
         
         # visualize
@@ -609,7 +716,64 @@ class PubmedQueryResult(object):
                  size='medium',
             ).set_size(15)
 
+        self.embedding = w2model
         return w2model
+
+    def k_means_embedding(self, k=100, verbose=False):
+        """Calculate k means centroids
+        for the word embedding space
+
+        Args:
+          k (int): Number of centroids, defaults to 100.
+          verbose (bool): Print closest word vectors to calculated centroids.
+        """
+        #from sklearn.neighbors import KNeighborsClassifier
+        from sklearn.cluster import KMeans
+        kmeans = KMeans(k, init='k-means++')
+        kmeans.fit(self.embedding.wv[self.embedding.wv.index2entity])
+        if verbose:
+            for i,center in enumerate(kmeans.cluster_centers_):
+                print(self.embedding.wv.similar_by_vector(center)[0])
+        self.embedding_kmeans = kmeans
+
+    def normalize_text_length(self, textlist, only_freqs=False):
+        """Using k centroids generated by self.k_means_embedding
+        transform text to average vectors with vector count per cluster
+
+        Args:
+          textlist (list): A list of processed tokens representing the text.
+            Should be processed in the same manner as the embedding.
+          only_freqs (bool): Do not include wordvectors.
+        """
+        import pandas as pd, numpy as np
+        textvectors = [
+            self.embedding.wv[token] for token in textlist if token in self.embedding.wv
+        ]
+        predictions = pd.DataFrame({
+            'label': self.embedding_kmeans.predict(textvectors),
+            'wordvector': textvectors
+        })
+        clustercounts = predictions.groupby('label').count()
+        # normalize for length of abstract
+        if clustercounts.wordvector.sum():
+            clustercounts.wordvector = clustercounts.wordvector/clustercounts.wordvector.sum()
+        clustercounts['avgvec'] = predictions.groupby('label').apply(
+            lambda x: np.vstack(x.wordvector).mean(axis=0)
+        )
+        emptyclusters = pd.DataFrame({
+            i:{'wordvector':0,'avgvec':np.zeros(self.embedding_kmeans.cluster_centers_.shape[1])}
+            for i in range(self.embedding_kmeans.cluster_centers_.shape[0]) if i not in clustercounts.index
+        }).T
+        clustercounts = pd.concat((clustercounts, emptyclusters), sort=True).sort_index()
+        if only_freqs:
+            return clustercounts.wordvector.values
+        else:
+            # Returning one large array with first cluster counts and then
+            # all appended average vectors of non-empty clusters
+            return np.append(
+                clustercounts.wordvector.values,
+                np.hstack(clustercounts.avgvec)
+            )
 
     @staticmethod
     def embedding_projection(emb1, emb2, topvoc_emb2=None, test_similarity=False, custom=True):
@@ -693,16 +857,29 @@ class PubmedQueryResult(object):
             # Plotting
             pca = PCA(n_components=2).fit(emb2.wv[emb2.wv.index2entity])
             fig, ax = plt.subplots()
+            ## emb training set
             Y = pca.transform(emb2.wv[emb2vocab])
             Y_projection = pca.transform(
                 np.stack([projfunc(w) for w in emb2vocab if w in emb1.wv.vocab])
             )
-            ax.scatter(Y[:,0], Y[:,1], label='original')
-            ax.scatter(Y_projection[:,0], Y_projection[:,1], label='projection')
+            ax.scatter(Y[:,0], Y[:,1], label='original_trained')
+            ax.scatter(Y_projection[:,0], Y_projection[:,1], label='projection_trained')
             for word, vec in list(zip(emb2vocab, Y))+list(zip(emb2vocab, Y_projection)):
                 ax.text(vec[0], vec[1],
                     word.title(),
                 ).set_size(15)
+            ## control set
+            Y_control = pca.transform(emb2.wv[controlset])
+            Y_control_projection = pca.transform(
+                np.stack([projfunc(w) for w in controlset if w in emb1.wv.vocab])
+            )
+            ax.scatter(Y_control[:,0], Y_control[:,1], label='original_control')
+            ax.scatter(Y_control_projection[:,0], Y_control_projection[:,1], label='projection_control')
+            for word, vec in list(zip(controlset, Y_control))+list(zip(controlset, Y_control_projection)):
+                ax.text(vec[0], vec[1],
+                    word.title(),
+                ).set_size(15)
+            ## legend
             ax.legend()
             
         return projfunc
