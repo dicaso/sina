@@ -549,24 +549,31 @@ class PubmedQueryResult(object):
     def predict_meshterms(self, only_freqs=False):
         import numpy as np
         from sklearn import svm, naive_bayes, metrics
-        #from gensim.corpora import Dictionary
-        #from gensim.models import TfidfModel
-        # Transform text
-        #embedding = self.gensim_w2v(doclevel=True)
-        #dct = Dictionary(self.processed_documents)
-        #dct.id2token = {v: k for k, v in dct.token2id.items()}
-        #corpus = [dct.doc2bow(line) for line in self.processed_documents]
-        #model = TfidfModel(corpus)
-        #X = [
-        #    [
-        #        (i,np.append(
-        #            embedding.wv[dct.id2token[i]] if dct.id2token[i] in embedding.wv else np.zeros(embedding.wv.vector_size),
-        #            f
-        #        )) for i,f in model[doc]
-        #    ]
-        #    for doc in corpus
-        #]
+        
+        # Processing pipeline
+        from sklearn.pipeline import Pipeline
+        from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.linear_model import SGDClassifier
+        ## Naive Bayes
+        #model = Pipeline([('vect', CountVectorizer()),
+        #        ('tfidf', TfidfTransformer()),
+        #        ('clf', naive_bayes.MultinomialNB()),
+        #])
+        ## Logistic regression
+        #model = Pipeline([('vect', CountVectorizer()),
+        #            ('tfidf', TfidfTransformer()),
+        #            ('clf', LogisticRegression(n_jobs=1, C=1e5)),
+        #])
+        ## Linear SVM
+        #sgd = Pipeline([('vect', CountVectorizer()),
+        #        ('tfidf', TfidfTransformer()),
+        #        ('clf', SGDClassifier(loss='hinge', penalty='l2',alpha=1e-3, random_state=42, max_iter=5, tol=None)),
+        #       ])
+        
         # Prepare data
+        #corpus = [' '.join(doc) for doc in self.processed_documents]
+        #corpus_test = [' '.join(doc) for doc in self.processed_documents_test]
         X = np.vstack(
             [self.normalize_text_length(doc, only_freqs) for doc in self.processed_documents]
         )
@@ -578,49 +585,98 @@ class PubmedQueryResult(object):
 
         # ML model
         self.models = []
+        train_accs = [] #train accuracies
         accuracies = []
         precisions = []
         recalls = []
+        f1s = []
         for i in range(Y.shape[1]):
-            #model = naive_bayes.GaussianNB()
-            model = svm.SVC(kernel='rbf', class_weight='balanced', gamma='scale')
+            #model = naive_bayes.MultinomialNB() #BernoulliNB() #GaussianNB()
+            #model = svm.SVC(kernel='rbf', class_weight='balanced', gamma='scale')
+            #model = LogisticRegression(n_jobs=1, C=1e5)
+            model = SGDClassifier(loss='hinge', penalty='l2',alpha=1e-3, random_state=42, max_iter=5, tol=None)
             model.fit(X, Y[:,i])
             Y_test_pred = model.predict(X_test)
+            Y_train_pred = model.predict(X)
             accuracies.append(metrics.accuracy_score(Y_test[:,i], Y_test_pred))
+            train_accs.append(metrics.accuracy_score(Y[:,i], Y_train_pred))
             precisions.append(metrics.precision_score(Y_test[:,i], Y_test_pred))
             recalls.append(metrics.recall_score(Y_test[:,i], Y_test_pred))
-            print(i, accuracies[-1])
+            f1s.append(metrics.f1_score(Y_test[:,i], Y_test_pred))
+            print(i, train_accs[-1], accuracies[-1])
             self.models.append(model)
+        self.meshtop['train_acc'] = train_accs
         self.meshtop['pred_acc'] = accuracies
         self.meshtop['pred_prec'] = precisions
         self.meshtop['pred_rec'] = recalls
+        self.meshtop['pred_F1'] = f1s
         self.X, self.X_test, self.Y, self.Y_test = X, X_test, Y, Y_test
-        
-    def sentence_embedding(self, test_size=.2, random_state=None):
-        """WORK IN PROGRESS"""
-        import pandas as pd
-        from sklearn.model_selection import train_test_split
+
+    def nn_keras_predictor(self, learning_rate=0.01, epochs=5, plothist=True):
+        """Implementing multi-label classification
+        not multi-class classification
+
+        Args:
+          learning_rate (float): nn model learning rate.
+          epochs (int): number of epochs.
+          plothist (bool): plot the loss and accuracy training evolution.
+        """
+        import tensorflow as tf
         from keras.models import Sequential
-        from keras.layers import Dense
+        from keras.layers import Dense, Activation, Dropout
+        from keras.preprocessing import text, sequence
+        from keras import optimizers
+        from keras import utils
+        batch_size = 32
+        #epochs = 5 # 2 seemed to small to get to good result, 10 too much
+        #learning_rate = 0.01
+        lr_decay = learning_rate/epochs # previously tested values: 1e-6
         
-        # Align meshtabel and results index as to place
-        # meshtabel value lists in results dataframe
-        self.meshtabel.sort_index(inplace=True)
-        self.results.sort_index(inplace=True)
-        self.results['meshterms'] = list(self.meshtabel.values)
-        self.results['meshsum'] = self.results.meshterms.apply(sum)
-        self.results['domainspec'] = self.results.meshsum > self.results.meshsum.median()
-        
-        # Split train/test
-        X_train, X_test, y_train, y_test = train_test_split(
-            self.results.title, self.results.domainspec,
-            test_size=test_size, random_state=random_state
-        )
-        
+        # Build the model
         model = Sequential()
-        model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
-        model.summary()
+        model.add(Dense(512, input_shape=(self.X.shape[1],)))
+        model.add(Activation('relu'))
+        model.add(Dropout(0.5))
+        model.add(Dense(self.Y.shape[1])) # number of classes
+        model.add(Activation('sigmoid')) # sigmoid instead of softmax for multi-label prediction
+
+        #sgd = optimizers.SGD(lr=learning_rate, decay=lr_decay, momentum=0.9, nesterov=True)
+        adam = optimizers.Adam(lr=learning_rate, decay=lr_decay)
+        model.compile(loss='binary_crossentropy', #'binary_crossentropy' 'mean_squared_error' 'categorical_crossentropy', # categorical didn't give good results
+                    optimizer=adam,#sgd, adam,
+                    metrics=['accuracy'])
         
+        mh = model.fit(self.X, self.Y,
+                            batch_size=batch_size,
+                            epochs=epochs,
+                            verbose=1,
+                            validation_split=0.1)
+        Y_pred_prob_test = model.predict(self.X_test)
+        # Calculate accuracy/mesh_term
+        Y_pred_test = Y_pred_prob_test > .5 # consider assigned label if above .5 'chance'
+        Y_accuracies_test = (
+            (self.Y_test & Y_pred_test) | (~self.Y_test & ~Y_pred_test)
+        ).mean(axis=0)
+        score = model.evaluate(
+            self.X_test, self.Y_test,
+            batch_size=batch_size, verbose=1)
+        print('Test accuracy:', score[1], Y_accuracies_test)
+
+        if plothist:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            fig, ax = plt.subplots()
+            ax.plot(np.arange(0, epochs), mh.history["loss"], label="train_loss")
+            ax.plot(np.arange(0, epochs), mh.history["val_loss"], label="val_loss")
+            ax.plot(np.arange(0, epochs), mh.history["acc"], label="train_acc")
+            ax.plot(np.arange(0, epochs), mh.history["val_acc"], label="val_acc")
+            ax.set_title("Training Loss and Accuracy")
+            ax.set_xlabel("Epoch #")
+            ax.set_ylabel("Loss/Accuracy")
+            ax.legend(loc="upper left")
+        
+        return model
+                
     def gensim_topics(self):
         import gensim
         import spacy
@@ -755,6 +811,7 @@ class PubmedQueryResult(object):
         })
         clustercounts = predictions.groupby('label').count()
         # normalize for length of abstract
+        # TODO is not ideal if then processing with e.g. naive_bayes.MultinomialNB
         if clustercounts.wordvector.sum():
             clustercounts.wordvector = clustercounts.wordvector/clustercounts.wordvector.sum()
         clustercounts['avgvec'] = predictions.groupby('label').apply(
