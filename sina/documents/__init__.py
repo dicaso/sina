@@ -502,6 +502,9 @@ class PubmedQueryResult(object):
             self.testset = True
         else: self.testset = False
 
+    def preprocess_text(self, title2content=True):
+        pass
+
     def analyze_mesh(self,topfreqs=20,getmeshnames=False):
         # wget ftp://nlmpubs.nlm.nih.gov/online/mesh/MESH_FILES/xmlmesh/desc2019.gz
         from collections import Counter
@@ -546,43 +549,86 @@ class PubmedQueryResult(object):
                 {pmid:meshtop_ix.isin(self.meshterms_test[i]) for i,pmid in enumerate(self.results_test.index)}
             ).T
 
-    def predict_meshterms(self, only_freqs=False):
+    def predict_meshterms(self, method='kmeans_summ', kmeans_only_freqs=False):
+        """Using classical ML algorithms for predicting
+        mesh terms belonging to an article
+
+        Args:
+          method (str): options
+            'tfidf_wv': Experiment to process in a similar
+               way to -> http://xplordat.com/2018/12/14/want-to-cluster-text-try-custom-word-embeddings/
+            'kmeans_summ': Summarize abstracts using kmeans in wordembedding space
+          kmeans_only_freqs (bool): Only process k-cluster frequencies
+        """
         import numpy as np
         from sklearn import svm, naive_bayes, metrics
-        
-        # Processing pipeline
         from sklearn.pipeline import Pipeline
         from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
         from sklearn.linear_model import LogisticRegression
         from sklearn.linear_model import SGDClassifier
-        ## Naive Bayes
-        #model = Pipeline([('vect', CountVectorizer()),
-        #        ('tfidf', TfidfTransformer()),
-        #        ('clf', naive_bayes.MultinomialNB()),
-        #])
-        ## Logistic regression
-        #model = Pipeline([('vect', CountVectorizer()),
-        #            ('tfidf', TfidfTransformer()),
-        #            ('clf', LogisticRegression(n_jobs=1, C=1e5)),
-        #])
-        ## Linear SVM
-        #sgd = Pipeline([('vect', CountVectorizer()),
-        #        ('tfidf', TfidfTransformer()),
-        #        ('clf', SGDClassifier(loss='hinge', penalty='l2',alpha=1e-3, random_state=42, max_iter=5, tol=None)),
-        #       ])
-        
-        # Prepare data
-        #corpus = [' '.join(doc) for doc in self.processed_documents]
-        #corpus_test = [' '.join(doc) for doc in self.processed_documents_test]
-        X = np.vstack(
-            [self.normalize_text_length(doc, only_freqs) for doc in self.processed_documents]
-        )
-        X_test = np.vstack(
-            [self.normalize_text_length(doc, only_freqs) for doc in self.processed_documents_test]
-        )
+
+        ## Preprocessing only
+        if method == 'tfidf_wv':
+            preptext = Pipeline([
+                ('vect', CountVectorizer(token_pattern=r'\S+')), #only splitting as already preprocessed
+                ('tfidf', TfidfTransformer())
+            ])
+            preptext.fit(self.results.processed)
+            X = preptext.transform(self.results.processed)
+            X_test = preptext.transform(self.results_test.processed)
+
+            # Transform to tfidf_wv
+            vocab = sorted(preptext.steps[0][1].vocabulary_)
+            embeddedword = [w in self.embedding.wv.vocab for w in vocab]
+            wvs = np.hstack(
+                [self.embedding.wv[w] for w in vocab if w in self.embedding.wv.vocab]
+            )
+            X = np.vstack(
+                [
+                    np.multiply(wvs, np.repeat(x.todense()[:,embeddedword],self.embedding.wv.vector_size))
+                    for x in X
+                ]
+            )
+            X_test = np.vstack(
+                [
+                    np.multiply(wvs, np.repeat(x.todense()[:,embeddedword],self.embedding.wv.vector_size))
+                    for x in X_test
+                ]
+            )
+            
+        elif method == 'kmeans_summ':
+            ## Naive Bayes
+            #model = Pipeline([('vect', CountVectorizer()),
+            #        ('tfidf', TfidfTransformer()),
+            #        ('clf', naive_bayes.MultinomialNB()),
+            #])
+            ## Logistic regression
+            #model = Pipeline([('vect', CountVectorizer()),
+            #            ('tfidf', TfidfTransformer()),
+            #            ('clf', LogisticRegression(n_jobs=1, C=1e5)),
+            #])
+            ## Linear SVM
+            #sgd = Pipeline([('vect', CountVectorizer()),
+            #        ('tfidf', TfidfTransformer()),
+            #        ('clf', SGDClassifier(loss='hinge', penalty='l2',alpha=1e-3, random_state=42, max_iter=5, tol=None)),
+            #       ])
+            
+            # Prepare data
+            #corpus = [' '.join(doc) for doc in self.processed_documents]
+            #corpus_test = [' '.join(doc) for doc in self.processed_documents_test]
+            X = np.vstack(
+                [self.normalize_text_length(doc, kmeans_only_freqs) for doc in self.processed_documents]
+            )
+            X_test = np.vstack(
+                [self.normalize_text_length(doc, kmeans_only_freqs) for doc in self.processed_documents_test]
+            )
+        else:
+            raise Exception('No method', method)
+
+        # Labels
         Y = self.meshtabel.values
         Y_test = self.meshtabel_test.values
-
+    
         # ML model
         self.models = []
         train_accs = [] #train accuracies
@@ -612,13 +658,14 @@ class PubmedQueryResult(object):
         self.meshtop['pred_F1'] = f1s
         self.X, self.X_test, self.Y, self.Y_test = X, X_test, Y, Y_test
 
-    def nn_keras_predictor(self, learning_rate=0.01, epochs=5, plothist=True):
+    def nn_keras_predictor(self, learning_rate=0.01, epochs=5, textprep=True, plothist=True):
         """Implementing multi-label classification
         not multi-class classification
 
         Args:
           learning_rate (float): nn model learning rate.
           epochs (int): number of epochs.
+          textprep (bool): preprocess text with keras functions
           plothist (bool): plot the loss and accuracy training evolution.
         """
         import tensorflow as tf
@@ -631,7 +678,18 @@ class PubmedQueryResult(object):
         #epochs = 5 # 2 seemed to small to get to good result, 10 too much
         #learning_rate = 0.01
         lr_decay = learning_rate/epochs # previously tested values: 1e-6
-        
+
+        # Preprocess data
+        if textprep:
+            max_words = 100000
+            max_len = 300 #usual max abstract length
+            tokenizer = text.Tokenizer(num_words=max_words, lower=True)
+            tokenizer.fit_on_texts(self.results.content)
+            self.X = tokenizer.texts_to_sequences(self.results.content)
+            self.X = sequence.pad_sequences(self.X, maxlen=max_len)
+            self.X_test = tokenizer.texts_to_sequences(self.results_test.content)
+            self.X_test = sequence.pad_sequences(self.X_test, maxlen=max_len)
+            
         # Build the model
         model = Sequential()
         model.add(Dense(512, input_shape=(self.X.shape[1],)))
@@ -640,17 +698,22 @@ class PubmedQueryResult(object):
         model.add(Dense(self.Y.shape[1])) # number of classes
         model.add(Activation('sigmoid')) # sigmoid instead of softmax for multi-label prediction
 
-        #sgd = optimizers.SGD(lr=learning_rate, decay=lr_decay, momentum=0.9, nesterov=True)
-        adam = optimizers.Adam(lr=learning_rate, decay=lr_decay)
+        sgd = optimizers.SGD(lr=learning_rate, decay=lr_decay, momentum=0.9, nesterov=True)
+        #adam = optimizers.Adam(lr=learning_rate, decay=lr_decay)
         model.compile(loss='binary_crossentropy', #'binary_crossentropy' 'mean_squared_error' 'categorical_crossentropy', # categorical didn't give good results
-                    optimizer=adam,#sgd, adam,
+                    optimizer=sgd,#sgd, adam,
                     metrics=['accuracy'])
         
-        mh = model.fit(self.X, self.Y,
-                            batch_size=batch_size,
-                            epochs=epochs,
-                            verbose=1,
-                            validation_split=0.1)
+        mh = model.fit(
+            self.X, self.Y,
+            batch_size=batch_size,
+            epochs=epochs,
+            verbose=1,
+            validation_split=0.1,
+            class_weight=self.Y.sum(axis=0)/self.Y.sum(axis=0).min() #'auto', # weight for important classes
+            # interesting solution @ https://stackoverflow.com/questions/48485870/multi-label-classification-with-class-weights-in-keras
+            #sample_weight=... # weight for important samples
+        )
         Y_pred_prob_test = model.predict(self.X_test)
         # Calculate accuracy/mesh_term
         Y_pred_test = Y_pred_prob_test > .5 # consider assigned label if above .5 'chance'
@@ -676,22 +739,6 @@ class PubmedQueryResult(object):
             ax.legend(loc="upper left")
         
         return model
-                
-    def gensim_topics(self):
-        import gensim
-        import spacy
-        nlp = spacy.load('en')
-        #nlp = spacy.load('en', disable=['ner', 'parser']) # disabling NER and POS tagging for speed
-        corpus = [
-            [token.lemma_.lower() for token in nlp(c) if not (token.is_stop or token.is_punct)]
-            for c in self.results.content
-        ]
-        dictionary = gensim.corpora.Dictionary(corpus)
-        corpus_bow = [dictionary.doc2bow(c) for c in corpus]
-        ldamodel = gensim.models.LdaModel(
-            corpus=corpus_bow, num_topics=10, id2word=dictionary, iterations=100
-        )
-        return ldamodel
 
     def gensim_w2v(self, vecsize=100, bigrams=True, split_hyphens=False, doclevel=False):
         """Build word2vec model with gensim
@@ -702,7 +749,8 @@ class PubmedQueryResult(object):
           split_hyphens (bool): split hyphened words into subtokens
           doclevel (bool): also process document level with sentence processing
         """
-        import spacy, gensim
+        import spacy, gensim, re
+        is_digit = re.compile(r'\d+(\.\d+)?') # spacy.token.is_digit not picking up floats
         nlp = spacy.load('en', disable=['ner', 'parser'])
         nlp.add_pipe(nlp.create_pipe('sentencizer'))
         if not split_hyphens:
@@ -713,7 +761,7 @@ class PubmedQueryResult(object):
         sentences = [
             [
             token.lemma_.lower() for token in sent
-            if not (token.is_stop or token.is_punct or token.is_digit)
+            if not (token.is_stop or token.is_punct or token.is_space or is_digit.fullmatch(token.text))
             ]
             for txt in self.results.content for sent in nlp(txt).sents
         ]
@@ -721,7 +769,7 @@ class PubmedQueryResult(object):
             self.processed_documents = [
                 [
                 token.lemma_.lower() for sent in nlp(txt).sents for token in sent
-                if not (token.is_stop or token.is_punct or token.is_digit)
+                if not (token.is_stop or token.is_punct or token.is_space or is_digit.fullmatch(token.text))
                 ]
                 for txt in self.results.content
             ]
@@ -729,7 +777,7 @@ class PubmedQueryResult(object):
                 self.processed_documents_test = [
                     [
                     token.lemma_.lower() for sent in nlp(txt).sents for token in sent
-                    if not (token.is_stop or token.is_punct or token.is_digit)
+                    if not (token.is_stop or token.is_punct or token.is_space or is_digit.fullmatch(token.text))
                     ]
                     for txt in self.results_test.content
                 ]
@@ -748,6 +796,11 @@ class PubmedQueryResult(object):
         # be reused for classification
         self.processed_sentences = sentences
         w2model = gensim.models.word2vec.Word2Vec(sentences, size=vecsize, hs=1)
+        if doclevel:
+            # Only retaining embedded words in results processed section TODO MAKE OPTIONAL
+            self.results['processed'] = [' '.join([t for t in doc if t in w2model.wv.vocab]) for doc in self.processed_documents]
+            if self.testset:
+                self.results_test['processed'] = [' '.join([t for t in doc if t in w2model.wv.vocab]) for doc in self.processed_documents_test]
         
         # visualize
         import matplotlib.pyplot as plt
@@ -775,30 +828,71 @@ class PubmedQueryResult(object):
         self.embedding = w2model
         return w2model
 
-    def k_means_embedding(self, k=100, verbose=False):
+    def k_means_embedding(self, k=100, calc_idcf=True, verbose=False):
         """Calculate k means centroids
         for the word embedding space
 
         Args:
           k (int): Number of centroids, defaults to 100.
+          calc_idcf (bool): Calculate inverse document cluster frequencies.
           verbose (bool): Print closest word vectors to calculated centroids.
         """
         #from sklearn.neighbors import KNeighborsClassifier
         from sklearn.cluster import KMeans
         kmeans = KMeans(k, init='k-means++')
         kmeans.fit(self.embedding.wv[self.embedding.wv.index2entity])
+        if calc_idcf:
+            import pandas as pd
+            predictions = pd.DataFrame({
+                'label': kmeans.predict(self.embedding.wv[self.embedding.wv.index2entity]),
+                'word': self.embedding.wv.index2entity
+            })
+            predictions['doc_freq'] = predictions.word.apply(
+                lambda x: {
+                    i for i,d in enumerate(self.processed_documents) if x in d
+                }
+            )
+            if verbose: print(predictions.value_counts())
+            # Calculate inverse document cluster-frequencies
+            self.idcf = predictions.groupby(
+                'label'
+            ).apply(lambda x: 1/len(set.union(*x.doc_freq)))
+            
         if verbose:
             for i,center in enumerate(kmeans.cluster_centers_):
                 print(self.embedding.wv.similar_by_vector(center)[0])
         self.embedding_kmeans = kmeans
 
-    def normalize_text_length(self, textlist, only_freqs=False):
+    def gensim_topics(self, num_topics=10):
+        import gensim
+        dictionary = gensim.corpora.Dictionary(self.processed_documents)
+        corpus_bow = [dictionary.doc2bow(c) for c in self.processed_documents]
+        ldamodel = gensim.models.LdaModel(
+            corpus=corpus_bow, num_topics=num_topics, id2word=dictionary, iterations=100
+        )
+        self.corpus_lda_topics = pd.concat([
+            pd.DataFrame(d, columns=['topic','prob']).set_index('topic').T
+            for d in ldamodel[corpus_bow]
+        ]).reset_index(drop=True).fillna(0)
+        # test set
+        if self.testset:
+            corpus_bow_test = [dictionary.doc2bow(c) for c in self.processed_documents_test]
+            self.corpus_lda_topics_test = pd.concat([
+                pd.DataFrame(d, columns=['topic','prob']).set_index('topic').T
+                for d in ldamodel[corpus_bow_test]
+            ]).reset_index(drop=True).fillna(0)
+        return ldamodel
+
+    def normalize_text_length(self, textlist, idcf=True, only_freqs=False):
         """Using k centroids generated by self.k_means_embedding
         transform text to average vectors with vector count per cluster
 
         Args:
           textlist (list): A list of processed tokens representing the text.
             Should be processed in the same manner as the embedding.
+          idcf (bool): Calculate cluster frequence inverse document cluster frequency,
+            kmeans clusters should have been generated with calc_idcf=True.
+            In current implementation idcf does not return embedding vectors.
           only_freqs (bool): Do not include wordvectors.
         """
         import pandas as pd, numpy as np
@@ -810,9 +904,12 @@ class PubmedQueryResult(object):
             'wordvector': textvectors
         })
         clustercounts = predictions.groupby('label').count()
-        # normalize for length of abstract
+        if idcf:
+            clustercounts.wordvector = (clustercounts.wordvector*self.idcf).fillna(0)
+            return clustercounts.wordvector.values
+        # normalize for length of abstract (only if not idcf)
         # TODO is not ideal if then processing with e.g. naive_bayes.MultinomialNB
-        if clustercounts.wordvector.sum():
+        elif clustercounts.wordvector.sum():
             clustercounts.wordvector = clustercounts.wordvector/clustercounts.wordvector.sum()
         clustercounts['avgvec'] = predictions.groupby('label').apply(
             lambda x: np.vstack(x.wordvector).mean(axis=0)
