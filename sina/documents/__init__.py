@@ -489,14 +489,18 @@ class PubmedQueryResult(object):
     Args:
       corpus (PubmedCollection): Pubmed corpus that provided results.
       results (list): Document result set.
-      test_fraction (float): If provided a random subset equaling test_fraction
-        is set apart for testing purposes after machine learning tasks downstream.
+      test_fraction (float, pd.DataFrame): If float provided a random subset equaling test_fraction
+        is set apart for testing purposes after machine learning tasks downstream. Can also be provided
+        as `DataFrame` directly, which is useful if you need to control test cases for comparitive purposes.
     """
     def __init__(self, corpus, results, test_fraction=.25):
         import pandas as pd
         self.results = pd.DataFrame(results).set_index('pmid')
         self.corpus = corpus
-        if test_fraction:
+        if isinstance(test_fraction, pd.DataFrame):
+            self.results_test = test_fraction
+            self.testset = True
+        elif test_fraction:
             from sklearn.model_selection import train_test_split
             self.results, self.results_test = train_test_split(self.results, test_size=test_fraction)
             self.testset = True
@@ -549,7 +553,7 @@ class PubmedQueryResult(object):
                 {pmid:meshtop_ix.isin(self.meshterms_test[i]) for i,pmid in enumerate(self.results_test.index)}
             ).T
 
-    def predict_meshterms(self, method='kmeans_summ', kmeans_only_freqs=False):
+    def predict_meshterms(self, method='kmeans_summ', kmeans_only_freqs=False, embedding=None):
         """Using classical ML algorithms for predicting
         mesh terms belonging to an article
 
@@ -559,6 +563,8 @@ class PubmedQueryResult(object):
                way to -> http://xplordat.com/2018/12/14/want-to-cluster-text-try-custom-word-embeddings/
             'kmeans_summ': Summarize abstracts using kmeans in wordembedding space
           kmeans_only_freqs (bool): Only process k-cluster frequencies
+          embedding (PubmedQueryResult): Use embedding from external 
+            PubmedQueryResult if provided.
         """
         import numpy as np
         from sklearn import svm, naive_bayes, metrics
@@ -578,20 +584,21 @@ class PubmedQueryResult(object):
             X_test = preptext.transform(self.results_test.processed)
 
             # Transform to tfidf_wv
+            embedding = self.embedding if embedding else self.embedding
             vocab = sorted(preptext.steps[0][1].vocabulary_)
-            embeddedword = [w in self.embedding.wv.vocab for w in vocab]
+            embeddedword = [w in embedding.wv.vocab for w in vocab]
             wvs = np.hstack(
-                [self.embedding.wv[w] for w in vocab if w in self.embedding.wv.vocab]
+                [embedding.wv[w] for w in vocab if w in embedding.wv.vocab]
             )
             X = np.vstack(
                 [
-                    np.multiply(wvs, np.repeat(x.todense()[:,embeddedword],self.embedding.wv.vector_size))
+                    np.multiply(wvs, np.repeat(x.todense()[:,embeddedword],embedding.wv.vector_size))
                     for x in X
                 ]
             )
             X_test = np.vstack(
                 [
-                    np.multiply(wvs, np.repeat(x.todense()[:,embeddedword],self.embedding.wv.vector_size))
+                    np.multiply(wvs, np.repeat(x.todense()[:,embeddedword],embedding.wv.vector_size))
                     for x in X_test
                 ]
             )
@@ -617,10 +624,10 @@ class PubmedQueryResult(object):
             #corpus = [' '.join(doc) for doc in self.processed_documents]
             #corpus_test = [' '.join(doc) for doc in self.processed_documents_test]
             X = np.vstack(
-                [self.normalize_text_length(doc, kmeans_only_freqs) for doc in self.processed_documents]
+                [self.normalize_text_length(doc, kmeans_only_freqs, embedding) for doc in self.processed_documents]
             )
             X_test = np.vstack(
-                [self.normalize_text_length(doc, kmeans_only_freqs) for doc in self.processed_documents_test]
+                [self.normalize_text_length(doc, kmeans_only_freqs, embedding) for doc in self.processed_documents_test]
             )
         else:
             raise Exception('No method', method)
@@ -839,7 +846,8 @@ class PubmedQueryResult(object):
         """
         #from sklearn.neighbors import KNeighborsClassifier
         from sklearn.cluster import KMeans
-        kmeans = KMeans(k, init='k-means++')
+        # setting n_jobs to -1 to use all available processors
+        kmeans = KMeans(k, init='k-means++', n_jobs=-1)
         kmeans.fit(self.embedding.wv[self.embedding.wv.index2entity])
         if calc_idcf:
             import pandas as pd
@@ -883,7 +891,7 @@ class PubmedQueryResult(object):
             ]).reset_index(drop=True).fillna(0)
         return ldamodel
 
-    def normalize_text_length(self, textlist, idcf=True, only_freqs=False):
+    def normalize_text_length(self, textlist, idcf=True, only_freqs=False, external=None):
         """Using k centroids generated by self.k_means_embedding
         transform text to average vectors with vector count per cluster
 
@@ -894,18 +902,24 @@ class PubmedQueryResult(object):
             kmeans clusters should have been generated with calc_idcf=True.
             In current implementation idcf does not return embedding vectors.
           only_freqs (bool): Do not include wordvectors.
+          external (PubmedQueryResult): Use embedding from external 
+            PubmedQueryResult if provided.
         """
         import pandas as pd, numpy as np
+        # Set embedding to use
+        embedding = external.embedding if external else self.embedding
+        embedding_kmeans = external.embedding_kmeans if external else self.embedding_kmeans
         textvectors = [
-            self.embedding.wv[token] for token in textlist if token in self.embedding.wv
+            embedding.wv[token] for token in textlist if token in embedding.wv
         ]
         predictions = pd.DataFrame({
-            'label': self.embedding_kmeans.predict(textvectors),
+            'label': embedding_kmeans.predict(textvectors),
             'wordvector': textvectors
         })
         clustercounts = predictions.groupby('label').count()
         if idcf:
-            clustercounts.wordvector = (clustercounts.wordvector*self.idcf).fillna(0)
+            idcf = external.idcf if external else self.idcf
+            clustercounts.wordvector = (clustercounts.wordvector*idcf).fillna(0)
             return clustercounts.wordvector.values
         # normalize for length of abstract (only if not idcf)
         # TODO is not ideal if then processing with e.g. naive_bayes.MultinomialNB
@@ -915,8 +929,8 @@ class PubmedQueryResult(object):
             lambda x: np.vstack(x.wordvector).mean(axis=0)
         )
         emptyclusters = pd.DataFrame({
-            i:{'wordvector':0,'avgvec':np.zeros(self.embedding_kmeans.cluster_centers_.shape[1])}
-            for i in range(self.embedding_kmeans.cluster_centers_.shape[0]) if i not in clustercounts.index
+            i:{'wordvector':0,'avgvec':np.zeros(embedding_kmeans.cluster_centers_.shape[1])}
+            for i in range(embedding_kmeans.cluster_centers_.shape[0]) if i not in clustercounts.index
         }).T
         clustercounts = pd.concat((clustercounts, emptyclusters), sort=True).sort_index()
         if only_freqs:

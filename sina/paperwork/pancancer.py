@@ -6,6 +6,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 plt.ion()
 
+# ML/NN settings
+w2vecsize  = 100
+k_clusters = 100
+topmesh    = 10
+
 ## cancertypes
 ## https://www.cancer.gov/about-nci/organization/ccg/research/structural-genomics/tcga/studied-cancers
 cancertypes = OrderedDict((
@@ -51,11 +56,44 @@ corpora = {
     for ct in cancertypes
 }
 
+# Create PubmedQueryResult that merges all specific PubmedQueryResults
+allcancers_training = pd.concat(
+        [corpora[ct].results for ct in cancertypes]
+).reset_index()
+allcancers_training.drop_duplicates('pmid', inplace=True)
+allcancers_testing = pd.concat(
+        [corpora[ct].results_test for ct in cancertypes]
+).reset_index()
+allcancers_testing.drop_duplicates('pmid', inplace=True)
+# Remove allcancers_testing papers that are in training
+# because they were in training for another cancer type
+allcancers_testing = allcancers_testing[
+    ~allcancers_testing.pmid.isin(allcancers_training.pmid)
+].copy()
+allcancers = PubmedQueryResult(
+    results = allcancers_training,
+    test_fraction = allcancers_testing,
+    corpus = pmc
+)
+del allcancers_training, allcancers_testing
+allcancers.gensim_w2v(vecsize=w2vecsize,doclevel=True)
+allcancers.k_means_embedding(k=k_clusters)
+allcancers.analyze_mesh(topfreqs=topmesh,getmeshnames=True)
+allcancers.predict_meshterms(kmeans_only_freqs=False)
+allcancers.nn_keras_predictor(textprep=False)
+
 for ct in cancertypes:
     print(ct)
-    corpora[ct]
-    corpora[ct].gensim_w2v(vecsize=100,doclevel=True)
-
-#qr.k_means_embedding(k=100)
-#qr.analyze_mesh(topfreqs=10,getmeshnames=True)
-#qr.predict_meshterms(kmeans_only_freqs=False)
+    corpora[ct].gensim_w2v(vecsize=w2vecsize,doclevel=True)
+    corpora[ct].k_means_embedding(k=k_clusters)
+    corpora[ct].analyze_mesh(topfreqs=topmesh,getmeshnames=True)
+    corpora[ct].predict_meshterms(kmeans_only_freqs=False)
+    corpora[ct].nn_keras_predictor(textprep=False)
+    
+docoverlap = np.zeros((len(cancertypes),len(cancertypes)))
+for i,cti in enumerate(cancertypes):
+    for j,ctj in enumerate(cancertypes):
+        docoverlap[i,j] = len(corpora[cti].results.index.intersection(
+          corpora[ctj].results.index))/len(corpora[cti].results.index)
+fig, ax = plt.subplots()
+plt.imshow(docoverlap)
