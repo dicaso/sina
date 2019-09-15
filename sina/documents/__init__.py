@@ -553,7 +553,7 @@ class PubmedQueryResult(object):
                 {pmid:meshtop_ix.isin(self.meshterms_test[i]) for i,pmid in enumerate(self.results_test.index)}
             ).T
 
-    def predict_meshterms(self, method='kmeans_summ', idcf= False, kmeans_only_freqs=False, embedding=None):
+    def predict_meshterms(self, method='kmeans_summ', model='bayes', idcf= False, kmeans_only_freqs=False, embedding=None):
         """Using classical ML algorithms for predicting
         mesh terms belonging to an article
 
@@ -562,6 +562,7 @@ class PubmedQueryResult(object):
             'tfidf_wv': Experiment to process in a similar
                way to -> http://xplordat.com/2018/12/14/want-to-cluster-text-try-custom-word-embeddings/
             'kmeans_summ': Summarize abstracts using kmeans in wordembedding space
+          model (str): ML model to use, options: 'bayes', 'svm', 'sgd', 'logreg'
           idcf (bool): Use inverse document cluster frequencies.
           kmeans_only_freqs (bool): Only process k-cluster frequencies
           embedding (PubmedQueryResult): Use embedding from external 
@@ -645,10 +646,14 @@ class PubmedQueryResult(object):
         recalls = []
         f1s = []
         for i in range(Y.shape[1]):
-            #model = naive_bayes.MultinomialNB() #BernoulliNB() #GaussianNB()
-            #model = svm.SVC(kernel='rbf', class_weight='balanced', gamma='scale')
-            #model = LogisticRegression(n_jobs=1, C=1e5)
-            model = SGDClassifier(loss='hinge', penalty='l2',alpha=1e-3, random_state=42, max_iter=5, tol=None)
+            if model == 'bayes':
+                model = naive_bayes.MultinomialNB() #BernoulliNB() #GaussianNB()
+            elif model == 'svm':
+                model = svm.SVC(kernel='rbf', class_weight='balanced', gamma='scale')
+            elif model == 'logreg':
+                model = LogisticRegression(n_jobs=1, C=1e5)
+            elif model == 'sgd':
+                model = SGDClassifier(loss='hinge', penalty='l2',alpha=1e-3, random_state=42, max_iter=5, tol=None)
             model.fit(X, Y[:,i])
             Y_test_pred = model.predict(X_test)
             Y_train_pred = model.predict(X)
