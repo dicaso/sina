@@ -553,7 +553,7 @@ class PubmedQueryResult(object):
                 {pmid:meshtop_ix.isin(self.meshterms_test[i]) for i,pmid in enumerate(self.results_test.index)}
             ).T
 
-    def predict_meshterms(self, method='kmeans_summ', kmeans_only_freqs=False, embedding=None):
+    def predict_meshterms(self, method='kmeans_summ', idcf= False, kmeans_only_freqs=False, embedding=None):
         """Using classical ML algorithms for predicting
         mesh terms belonging to an article
 
@@ -562,6 +562,7 @@ class PubmedQueryResult(object):
             'tfidf_wv': Experiment to process in a similar
                way to -> http://xplordat.com/2018/12/14/want-to-cluster-text-try-custom-word-embeddings/
             'kmeans_summ': Summarize abstracts using kmeans in wordembedding space
+          idcf (bool): Use inverse document cluster frequencies.
           kmeans_only_freqs (bool): Only process k-cluster frequencies
           embedding (PubmedQueryResult): Use embedding from external 
             PubmedQueryResult if provided.
@@ -624,10 +625,10 @@ class PubmedQueryResult(object):
             #corpus = [' '.join(doc) for doc in self.processed_documents]
             #corpus_test = [' '.join(doc) for doc in self.processed_documents_test]
             X = np.vstack(
-                [self.normalize_text_length(doc, kmeans_only_freqs, embedding) for doc in self.processed_documents]
+                [self.normalize_text_length(doc, idcf, kmeans_only_freqs, embedding) for doc in self.processed_documents]
             )
             X_test = np.vstack(
-                [self.normalize_text_length(doc, kmeans_only_freqs, embedding) for doc in self.processed_documents_test]
+                [self.normalize_text_length(doc, idcf, kmeans_only_freqs, embedding) for doc in self.processed_documents_test]
             )
         else:
             raise Exception('No method', method)
