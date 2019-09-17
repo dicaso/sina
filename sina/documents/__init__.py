@@ -494,13 +494,16 @@ class PubmedQueryResult(object):
         as `DataFrame` directly, which is useful if you need to control test cases for comparitive purposes.
     """
     def __init__(self, corpus, results, test_fraction=.25):
-        import pandas as pd
+        import pandas as pd, warnings
         self.results = pd.DataFrame(results).set_index('pmid')
         duplicates = self.results.index.duplicated().sum()
         if duplicates:
-            import warnings
-            warnings.warn('Removing %s pmid duplicates' % 100)
+            warnings.warn('Removing %s pmid duplicates' % duplicates)
             self.results = self.results.reset_index().drop_duplicates('pmid').set_index('pmid')
+        nancontent = self.results[['title','content']].isna().sum().sum()
+        if nancontent:
+            warnings.warn('Removing %s records that have title/abstract missing' % nancontent)
+            self.results.dropna(subset=['title','content'], inplace=True)
         self.corpus = corpus
         if isinstance(test_fraction, pd.DataFrame):
             self.results_test = test_fraction
