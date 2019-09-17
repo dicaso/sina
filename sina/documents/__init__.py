@@ -511,8 +511,106 @@ class PubmedQueryResult(object):
             self.testset = True
         else: self.testset = False
 
-    def preprocess_text(self, title2content=True):
-        pass
+    def preprocess_text(self, title2content=True, bigrams=2, split_hyphens=False):
+        """Preprocessing text, steps involving tokenizations and decisions on bigrams.
+        The methods creates an function attribute `preprocess_documents` that can be used 
+        to preprocess other documents in the same way, for example an extra test set of 
+        documents.
+
+        Args:
+          title2content (bool): Add the title to the abstract content.
+          bigrams (bool|int): if True or 1 build bigram, if 2 build trigram, etc
+          split_hyphens (bool): split hyphened words into subtokens
+        """
+        import spacy, gensim, re, functools, itertools as it
+        
+        if title2content:
+            # Currently whoosh index does not add the title to the content
+            # if this changes in the future this section should be removed
+            self.results.content = self.results.title + ' ' + self.results.content
+            if self.testset:
+                self.results_test.content = self.results_test.title + ' ' + self.results_test.content
+
+        # Tokenization
+        is_digit = re.compile(r'\d+(\.\d+)?') # spacy.token.is_digit not picking up floats
+        nlp = spacy.load('en', disable=['ner', 'parser'])
+        nlp.add_pipe(nlp.create_pipe('sentencizer'))
+        if not split_hyphens:
+            # Prevent splitting intra-word hyphens
+            suffixes = nlp.Defaults.suffixes + (r'''\w+-\w+''',)
+            suffix_regex = spacy.util.compile_suffix_regex(suffixes)
+            nlp.tokenizer.suffix_search = suffix_regex.search
+        make_documents = lambda docs: [
+            [
+                [
+                token.lemma_.lower() for token in sent
+                if not (token.is_stop
+                            or token.is_punct
+                            or token.is_space
+                            or is_digit.fullmatch(token.text))
+                ]
+            for sent in nlp(txt).sents
+            ]
+            for txt in docs
+        ]
+        documents = make_documents(self.results.content)
+        phrase_models = [] # to store the bigram models
+        while bigrams:
+            bigrams-=1 # for trigram set bigrams=2
+            bigram = gensim.models.Phrases(
+                (sent for doc in documents for sent in doc), min_count=30, progress_per=10000,
+                delimiter=chr(183).encode() # interpunct aka &middot; as delimiter
+            )
+            documents = [[bigram[sent] for sent in doc] for doc in documents]
+            phrase_models.append(lambda s: bigram[s])
+        apply_bigrams = lambda sent: functools.reduce(
+            lambda value, function: function(value),
+            phrase_models,
+            sent
+        )
+        self.preprocess_documents = lambda documents: [
+            [apply_bigrams(sent) for sent in doc] for doc in make_documents(documents)
+        ]
+        self.results['processed'] = documents
+        if self.testset:
+            self.results_test['processed'] = self.preprocess_documents(self.results_test.content)
+
+    def transform_text(self, method='counts', tfid_kwargs={}, preprocess=False, **kwargs):
+        """Transform text in numerical format that can be used by predictive algorithms.
+        Sets `self.X` and `self.X_test`
+        
+        Args:
+          method (str): 'counts', 'tfid'
+          tfid_kwargs (dict): Passed to sklearn.feature_extraction.text.TfidfTransformer
+          preprocess (bool): Perform first the text preprocessing, if this is not set to true
+            but kwargs are provided, preprocessing is also performed.
+          **kwargs: Passed to method `preprocess_text`
+        """
+        import gensim, itertools as it
+        
+        # Text preprocessing
+        if kwargs or preprocess:
+            self.preprocess_text(**kwargs)
+        
+        # Gensim corpus
+        self.dictionary = gensim.corpora.Dictionary((it.chain.from_iterable(doc) for doc in self.results.processed))
+        self.results['bow'] = [
+            self.dictionary.doc2bow(it.chain.from_iterable(doc)) for doc in self.results.processed
+        ]
+        self.X = gensim.matutils.corpus2csc(self.results.bow, num_terms=len(self.dictionary)).T
+
+        if method == 'tfid':
+            from sklearn.feature_extraction.text import TfidfTransformer
+            self.tfidftransformer = TfidfTransformer(**tfid_kwargs)
+            self.X = self.tfidftransformer.fit_transform(self.X)
+            
+        if self.testset:
+             self.results_test['bow'] = [
+                 self.dictionary.doc2bow(it.chain.from_iterable(doc)) for doc in self.results_test.processed
+             ]
+             self.X_test = gensim.matutils.corpus2csc(self.results_test.bow, num_terms=len(self.dictionary)).T
+             if method == 'tfid':
+                 self.X_test = self.tfidftransformer.transform(self.X_test)
 
     def analyze_mesh(self,topfreqs=20,getmeshnames=False):
         # wget ftp://nlmpubs.nlm.nih.gov/online/mesh/MESH_FILES/xmlmesh/desc2019.gz
@@ -557,21 +655,35 @@ class PubmedQueryResult(object):
             self.meshtabel_test = pd.DataFrame(
                 {pmid:meshtop_ix.isin(self.meshterms_test[i]) for i,pmid in enumerate(self.results_test.index)}
             ).T
+            
+            # Direct links to the arrays for prediction algorithms
+            self.Y = self.meshtabel.values
+            self.Y_test = self.meshtabel_test.values
 
-    def predict_meshterms(self, method='kmeans_summ', model='bayes', idcf= False, kmeans_only_freqs=False, embedding=None):
+
+    def predict_meshterms(
+            self, method='kmeans_summ', kfilter=100, model='bayes', idcf= False,
+            kmeans_only_freqs=False, embedding=None, rebalance=False
+            ):
         """Using classical ML algorithms for predicting
         mesh terms belonging to an article
+
+        Requires:
+          X, X_test, Y, and Y_test to have been set as attributes on the model.
+          This can be done with the methods `transform_text` and `analyze_mesh`.
 
         Args:
           method (str): options
             'tfidf_wv': Experiment to process in a similar
                way to -> http://xplordat.com/2018/12/14/want-to-cluster-text-try-custom-word-embeddings/
             'kmeans_summ': Summarize abstracts using kmeans in wordembedding space
+          kfilter (int): If provided the number to reduce X to for k best predicting features.
           model (str): ML model to use, options: 'bayes', 'svm', 'sgd', 'logreg'
           idcf (bool): Use inverse document cluster frequencies.
           kmeans_only_freqs (bool): Only process k-cluster frequencies
           embedding (PubmedQueryResult): Use embedding from external 
             PubmedQueryResult if provided.
+          rebalance (bool): Balance dataset by random undersampling.
         """
         import numpy as np
         from sklearn import svm, naive_bayes, metrics
@@ -582,6 +694,7 @@ class PubmedQueryResult(object):
 
         ## Preprocessing only
         if method == 'tfidf_wv':
+            #TODO move to transform_text
             preptext = Pipeline([
                 ('vect', CountVectorizer(token_pattern=r'\S+')), #only splitting as already preprocessed
                 ('tfidf', TfidfTransformer())
@@ -628,20 +741,17 @@ class PubmedQueryResult(object):
             #       ])
             
             # Prepare data
-            #corpus = [' '.join(doc) for doc in self.processed_documents]
-            #corpus_test = [' '.join(doc) for doc in self.processed_documents_test]
-            X = np.vstack(
-                [self.normalize_text_length(doc, idcf, kmeans_only_freqs, embedding) for doc in self.processed_documents]
-            )
-            X_test = np.vstack(
-                [self.normalize_text_length(doc, idcf, kmeans_only_freqs, embedding) for doc in self.processed_documents_test]
-            )
+            import itertools as it
+            X = self.X
+            X_test = self.X_test
+            #X = np.vstack(
+            #    [self.normalize_text_length(list(it.chain.from_iterable(doc)), idcf, kmeans_only_freqs, embedding) for doc in self.results.processed]
+            #)
+            #X_test = np.vstack(
+            #    [self.normalize_text_length(list(it.chain.from_iterable(doc)), idcf, kmeans_only_freqs, embedding) for doc in self.results_test.processed]
+            #)
         else:
             raise Exception('No method', method)
-
-        # Labels
-        Y = self.meshtabel.values
-        Y_test = self.meshtabel_test.values
     
         # ML model
         self.models = []
@@ -650,7 +760,27 @@ class PubmedQueryResult(object):
         precisions = []
         recalls = []
         f1s = []
-        for i in range(Y.shape[1]):
+        if kfilter: k = kfilter
+        for i in range(self.Y.shape[1]):
+            y = self.Y[:,i]
+            
+            # Balance
+            if rebalance:
+                from imblearn.under_sampling import RandomUnderSampler
+                rus = RandomUnderSampler(return_indices=True)
+                X_rus, y, id_rus = rus.fit_sample(X, y)
+            else:
+                X_rus = X
+            
+            # Filter
+            if kfilter:
+                from sklearn.feature_selection import SelectKBest, f_classif
+                kfilter = SelectKBest(f_classif, k=k)
+                X_fil = kfilter.fit_transform(X_rus, y)
+                X_fil_test = kfilter.transform(X_test)
+            else: X_fil, X_fil_test = X, X_test
+            
+            # Model
             if model == 'bayes':
                 model = naive_bayes.MultinomialNB() #BernoulliNB() #GaussianNB()
             elif model == 'svm':
@@ -659,14 +789,14 @@ class PubmedQueryResult(object):
                 model = LogisticRegression(n_jobs=1, C=1e5)
             elif model == 'sgd':
                 model = SGDClassifier(loss='hinge', penalty='l2',alpha=1e-3, random_state=42, max_iter=5, tol=None)
-            model.fit(X, Y[:,i])
-            Y_test_pred = model.predict(X_test)
-            Y_train_pred = model.predict(X)
-            accuracies.append(metrics.accuracy_score(Y_test[:,i], Y_test_pred))
-            train_accs.append(metrics.accuracy_score(Y[:,i], Y_train_pred))
-            precisions.append(metrics.precision_score(Y_test[:,i], Y_test_pred))
-            recalls.append(metrics.recall_score(Y_test[:,i], Y_test_pred))
-            f1s.append(metrics.f1_score(Y_test[:,i], Y_test_pred))
+            model.fit(X_fil, y)
+            Y_test_pred = model.predict(X_fil_test)
+            Y_train_pred = model.predict(X_fil)
+            accuracies.append(metrics.accuracy_score(self.Y_test[:,i], Y_test_pred))
+            train_accs.append(metrics.accuracy_score(y, Y_train_pred))
+            precisions.append(metrics.precision_score(self.Y_test[:,i], Y_test_pred))
+            recalls.append(metrics.recall_score(self.Y_test[:,i], Y_test_pred))
+            f1s.append(metrics.f1_score(self.Y_test[:,i], Y_test_pred))
             print(i, train_accs[-1], accuracies[-1])
             self.models.append(model)
         self.meshtop['train_acc'] = train_accs
@@ -674,7 +804,10 @@ class PubmedQueryResult(object):
         self.meshtop['pred_prec'] = precisions
         self.meshtop['pred_rec'] = recalls
         self.meshtop['pred_F1'] = f1s
-        self.X, self.X_test, self.Y, self.Y_test = X, X_test, Y, Y_test
+        # for testing purposes
+        # X_fil will only be relevant for last tested model
+        self.X_fil, self.X_fil_test = X_fil, X_fil_test
+        self.kfilter = kfilter
 
     def nn_keras_predictor(self, learning_rate=0.01, epochs=5, textprep=True, plothist=True):
         """Implementing multi-label classification
@@ -692,6 +825,8 @@ class PubmedQueryResult(object):
         from keras.preprocessing import text, sequence
         from keras import optimizers
         from keras import utils
+        import numpy as np, pandas as pd
+        from sklearn import metrics
         batch_size = 32
         #epochs = 5 # 2 seemed to small to get to good result, 10 too much
         #learning_rate = 0.01
@@ -742,7 +877,15 @@ class PubmedQueryResult(object):
             self.X_test, self.Y_test,
             batch_size=batch_size, verbose=1)
         print('Test accuracy:', score[1], Y_accuracies_test)
-
+        # Performance tabel
+        self.meshtop_nn = pd.DataFrame(
+            np.vstack(
+                metrics.classification.precision_recall_fscore_support(self.Y_test, Y_pred_test)
+            ).T,
+            columns=['prec','rec','F1','support'],
+            index=self.meshtop.meshid
+        )
+        
         if plothist:
             import matplotlib.pyplot as plt
             import numpy as np
@@ -758,67 +901,19 @@ class PubmedQueryResult(object):
         
         return model
 
-    def gensim_w2v(self, vecsize=100, bigrams=True, split_hyphens=False, doclevel=False):
+    def gensim_w2v(self, vecsize=100):
         """Build word2vec model with gensim
         
         Args:
           vecsize (int): Size of the embedding vectors
-          bigrams (bool|int): if True or 1 build bigram, if 2 build trigram, etc
-          split_hyphens (bool): split hyphened words into subtokens
-          doclevel (bool): also process document level with sentence processing
         """
-        import spacy, gensim, re
-        is_digit = re.compile(r'\d+(\.\d+)?') # spacy.token.is_digit not picking up floats
-        nlp = spacy.load('en', disable=['ner', 'parser'])
-        nlp.add_pipe(nlp.create_pipe('sentencizer'))
-        if not split_hyphens:
-            # Prevent splitting intra-word hyphens
-            suffixes = nlp.Defaults.suffixes + (r'''\w+-\w+''',)
-            suffix_regex = spacy.util.compile_suffix_regex(suffixes)
-            nlp.tokenizer.suffix_search = suffix_regex.search
-        sentences = [
-            [
-            token.lemma_.lower() for token in sent
-            if not (token.is_stop or token.is_punct or token.is_space or is_digit.fullmatch(token.text))
-            ]
-            for txt in self.results.content for sent in nlp(txt).sents
-        ]
-        if doclevel:
-            self.processed_documents = [
-                [
-                token.lemma_.lower() for sent in nlp(txt).sents for token in sent
-                if not (token.is_stop or token.is_punct or token.is_space or is_digit.fullmatch(token.text))
-                ]
-                for txt in self.results.content
-            ]
-            if self.testset:
-                self.processed_documents_test = [
-                    [
-                    token.lemma_.lower() for sent in nlp(txt).sents for token in sent
-                    if not (token.is_stop or token.is_punct or token.is_space or is_digit.fullmatch(token.text))
-                    ]
-                    for txt in self.results_test.content
-                ]
-        while bigrams:
-            bigrams-=1 # for trigram set bigrams=2
-            bigram = gensim.models.Phrases(
-                sentences, min_count=30, progress_per=10000,
-                delimiter=chr(183).encode() # interpunct aka &middot; as delimiter
-            )
-            sentences = [bigram[sent] for sent in sentences]
-            if doclevel:
-                self.processed_documents = [bigram[doc] for doc in self.processed_documents]
-                if self.testset:
-                    self.processed_documents_test = [bigram[doc] for doc in self.processed_documents_test]
-        # todo put this code for processing sentences in function so it can also
-        # be reused for classification
-        self.processed_sentences = sentences
-        w2model = gensim.models.word2vec.Word2Vec(sentences, size=vecsize, hs=1)
-        if doclevel:
-            # Only retaining embedded words in results processed section TODO MAKE OPTIONAL
-            self.results['processed'] = [' '.join([t for t in doc if t in w2model.wv.vocab]) for doc in self.processed_documents]
-            if self.testset:
-                self.results_test['processed'] = [' '.join([t for t in doc if t in w2model.wv.vocab]) for doc in self.processed_documents_test]
+        import gensim
+        w2model = gensim.models.word2vec.Word2Vec([sent for doc in self.results.processed for sent in doc], size=vecsize, hs=1)
+
+        # Only retaining embedded words in results processed section TODO MAKE OPTIONAL
+        #self.results.processed = [' '.join([t for t in doc if t in w2model.wv.vocab]) for doc in self.results.processed]
+        #if self.testset:
+        #    self.results_test.processed = [' '.join([t for t in doc if t in w2model.wv.vocab]) for doc in self.results_test.processed]
         
         # visualize
         import matplotlib.pyplot as plt
@@ -868,7 +963,8 @@ class PubmedQueryResult(object):
             })
             predictions['doc_freq'] = predictions.word.apply(
                 lambda x: {
-                    i for i,d in enumerate(self.processed_documents) if x in d
+                    # joining sentences in docs
+                    i for i,d in enumerate((([token for sent in doc for token in sent] for doc in self.results.processed))) if x in d
                 }
             )
             if verbose: print(predictions.value_counts())
@@ -884,8 +980,8 @@ class PubmedQueryResult(object):
 
     def gensim_topics(self, num_topics=10):
         import gensim
-        dictionary = gensim.corpora.Dictionary(self.processed_documents)
-        corpus_bow = [dictionary.doc2bow(c) for c in self.processed_documents]
+        dictionary = gensim.corpora.Dictionary(self.results.processed)
+        corpus_bow = [dictionary.doc2bow(c) for c in self.results.processed]
         ldamodel = gensim.models.LdaModel(
             corpus=corpus_bow, num_topics=num_topics, id2word=dictionary, iterations=100
         )
@@ -895,7 +991,7 @@ class PubmedQueryResult(object):
         ]).reset_index(drop=True).fillna(0)
         # test set
         if self.testset:
-            corpus_bow_test = [dictionary.doc2bow(c) for c in self.processed_documents_test]
+            corpus_bow_test = [dictionary.doc2bow(c) for c in self.results_test.processed]
             self.corpus_lda_topics_test = pd.concat([
                 pd.DataFrame(d, columns=['topic','prob']).set_index('topic').T
                 for d in ldamodel[corpus_bow_test]

@@ -4,6 +4,8 @@ from sina.documents import PubmedCollection, PubmedQueryResult
 from collections import OrderedDict
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.rcParams['figure.max_open_warning'] = 50
 plt.ion()
 
 # ML/NN settings
@@ -58,7 +60,8 @@ corpora = {
 
 # Create PubmedQueryResult that merges all specific PubmedQueryResults
 allcancers_training = pd.concat(
-        [corpora[ct].results for ct in cancertypes]
+        [corpora[ct].results for ct in cancertypes],
+        sort=False
 ).reset_index()
 allcancers_training.drop_duplicates('pmid', inplace=True)
 allcancers_testing = pd.concat(
@@ -70,6 +73,7 @@ allcancers_testing.drop_duplicates('pmid', inplace=True)
 allcancers_testing = allcancers_testing[
     ~allcancers_testing.pmid.isin(allcancers_training.pmid)
 ].copy()
+allcancers_testing.set_index('pmid', inplace=True)
 allcancers = PubmedQueryResult(
     results = allcancers_training,
     test_fraction = allcancers_testing,
