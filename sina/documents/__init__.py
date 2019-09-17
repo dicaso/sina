@@ -768,18 +768,24 @@ class PubmedQueryResult(object):
             y = self.Y[:,i]
             
             # Balance
-            if rebalance:
+            #For other resampling options:
+            #https://www.kaggle.com/rafjaa/resampling-strategies-for-imbalanced-datasets
+            if rebalance == 'undersample':
                 from imblearn.under_sampling import RandomUnderSampler
                 rus = RandomUnderSampler(return_indices=True)
-                X_rus, y, id_rus = rus.fit_sample(X, y)
+                X_rsmpl, y, id_rsmpl = rus.fit_sample(X, y)
+            elif rebalance == 'oversample':
+                from imblearn.over_sampling import SMOTE
+                smote = SMOTE(ratio='minority')
+                X_rsmpl, y = smote.fit_sample(X, y)
             else:
-                X_rus = X
+                X_rsmpl = X
             
             # Filter
             if kfilter:
                 from sklearn.feature_selection import SelectKBest, f_classif
                 kfilter = SelectKBest(f_classif, k=k)
-                X_fil = kfilter.fit_transform(X_rus, y)
+                X_fil = kfilter.fit_transform(X_rsmpl, y)
                 X_fil_test = kfilter.transform(X_test)
             else: X_fil, X_fil_test = X, X_test
             
