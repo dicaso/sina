@@ -838,8 +838,9 @@ class PubmedQueryResult(object):
         self.kfilter = kfilter
 
     def nn_keras_predictor(
-            self, model='simple', learning_rate=0.01, epochs=5,
-            embedding_trainable=False, textprep=False, plothist=True
+            self, model='simple', learning_rate=0.01, epochs=5, batch_size=10,
+            num_filters=128, kernel_size=5, embedding=None,
+            embedding_trainable=False, plothist=True, return_model=False
             ):
         """Implementing multi-label classification
         not multi-class classification
@@ -847,10 +848,14 @@ class PubmedQueryResult(object):
         Args:
           model (str): 'simple', 'cnn'
           learning_rate (float): nn model learning rate.
-          epochs (int): number of epochs.
+          epochs (int): Number of epochs.
+          batch_size (int): Number per batch.
+          num_filters (int): CNN filters.
+          kernel_size (int): CNN kernel size.
+          embedding (gensim.embedding): Use externally trained embedding.
           embedding_trainable (bool): Embedding can be further optimized if true.
-          textprep (bool): preprocess text with keras functions
           plothist (bool): plot the loss and accuracy training evolution.
+          return_model (bool): If true, just return model; used for grid search.
         """
         import tensorflow as tf
         from keras.models import Sequential
@@ -859,21 +864,19 @@ class PubmedQueryResult(object):
         from keras import Input, layers, optimizers, utils
         import numpy as np, pandas as pd
         from sklearn import metrics
-        batch_size = 10#32
-        #epochs = 5 # 2 seemed to small to get to good result, 10 too much
         #learning_rate = 0.01
         lr_decay = learning_rate/epochs # previously tested values: 1e-6
 
         # Preprocess data
-        if textprep:
-            max_words = 100000
-            max_len = 300 #usual max abstract length
-            tokenizer = text.Tokenizer(num_words=max_words, lower=True)
-            tokenizer.fit_on_texts(self.results.content)
-            self.X = tokenizer.texts_to_sequences(self.results.content)
-            self.X = sequence.pad_sequences(self.X, maxlen=max_len)
-            self.X_test = tokenizer.texts_to_sequences(self.results_test.content)
-            self.X_test = sequence.pad_sequences(self.X_test, maxlen=max_len)
+        # if textprep:
+        #     max_words = 100000
+        #     max_len = 300 #usual max abstract length
+        #     tokenizer = text.Tokenizer(num_words=max_words, lower=True)
+        #     tokenizer.fit_on_texts(self.results.content)
+        #     self.X = tokenizer.texts_to_sequences(self.results.content)
+        #     self.X = sequence.pad_sequences(self.X, maxlen=max_len)
+        #     self.X_test = tokenizer.texts_to_sequences(self.results_test.content)
+        #     self.X_test = sequence.pad_sequences(self.X_test, maxlen=max_len)
 
         # Prepare embedding matrix
         embedding_vector_size = self.embedding.wv.vector_size
@@ -901,7 +904,7 @@ class PubmedQueryResult(object):
                 input_length=self.X.shape[1],
                 trainable=embedding_trainable
             ))
-            model.add(layers.Conv1D(128, 5, activation='relu'))
+            model.add(layers.Conv1D(num_filters, kernel_size, activation='relu'))
             model.add(layers.GlobalMaxPool1D()) #model.add(layers.Flatten())
             model.add(layers.Dense(10, activation='relu'))
             model.add(layers.Dense(self.Y.shape[1], activation='sigmoid'))
@@ -912,7 +915,10 @@ class PubmedQueryResult(object):
         model.compile(loss='binary_crossentropy', #'binary_crossentropy' 'mean_squared_error' 'categorical_crossentropy', # categorical didn't give good results
                     optimizer='adam',#sgd, adam,
                     metrics=['accuracy'])
-        model.summary()
+        
+        if return_model: # for grid search
+            return model
+        else: model.summary()
         
         mh = model.fit(
             self.X, self.Y,
@@ -958,6 +964,48 @@ class PubmedQueryResult(object):
         
         return model
 
+    def nn_grid_search(self, external_embedding, epochs=5):
+        """Comparing nn architectures and exploring
+        hyperparamter combinations
+
+        Args:
+          external_embedding (gensim.embedding): External embedding to use in comparison.
+          epochs (int): Neural network epochs.
+        """
+        from keras.wrappers.scikit_learn import KerasClassifier
+        from sklearn.model_selection import RandomizedSearchCV
+
+        print('Grid search for embeddings/hyperparameters')
+        # Parameter grid for grid search
+        param_grid = dict(
+            num_filters=[32, 64, 128],
+            kernel_size=[3, 5, 7],
+            embedding=[self.embedding, external_embedding],
+            #maxlen=[maxlen],
+            return_model=[True]
+        )
+
+        model = KerasClassifier(
+            build_fn=create_model,
+            epochs=epochs, batch_size=10,
+            verbose=False
+        )
+
+        grid = RandomizedSearchCV(
+            estimator=model, param_distributions=param_grid,
+            cv=4, verbose=1, n_iter=5
+        )
+
+        self.nn_grid_result = grid.fit(self.X, self.Y)
+        test_accuracy = grid.score(self.X_test, self.Y_test)
+        print(
+            'Best Accuracy : {:.4f}\n{}\nTest Accuracy : {:.4f}\n\n'.format(
+                self.nn_grid_result.best_score_,
+                self.nn_grid_result.best_params_,
+                test_accuracy
+            )
+        )
+        
     def gensim_w2v(self, vecsize=100):
         """Build word2vec model with gensim
         

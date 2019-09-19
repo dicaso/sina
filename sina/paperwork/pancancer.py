@@ -93,7 +93,9 @@ for ct in cancertypes:
     corpora[ct].gensim_w2v(vecsize=w2vecsize,doclevel=True)
     corpora[ct].k_means_embedding(k=k_clusters)
     corpora[ct].predict_meshterms(mesh='svm', kmeans_only_freqs=False, rebalance='oversample')
-    corpora[ct].nn_keras_predictor(textprep=False)
+    # Transform X for embedded processing
+    corpora[ct].transform_text(method='idx')
+    corpora[ct].nn_keras_predictor(model='cnn',embedding_trainable=False)
     
 docoverlap = np.zeros((len(cancertypes),len(cancertypes)))
 for i,cti in enumerate(cancertypes):
