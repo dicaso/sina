@@ -96,6 +96,7 @@ for ct in cancertypes:
     # Transform X for embedded processing
     corpora[ct].transform_text(method='idx')
     corpora[ct].nn_keras_predictor(model='cnn',embedding_trainable=False)
+    corpora[ct].nn_grid_search(qr_big.embedding, n_jobs=1)
     
 docoverlap = np.zeros((len(cancertypes),len(cancertypes)))
 for i,cti in enumerate(cancertypes):

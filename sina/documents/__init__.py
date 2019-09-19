@@ -879,13 +879,16 @@ class PubmedQueryResult(object):
         #     self.X_test = sequence.pad_sequences(self.X_test, maxlen=max_len)
 
         # Prepare embedding matrix
+        embedding = embedding if embedding else self.embedding
         embedding_vector_size = self.embedding.wv.vector_size
-        embedding = np.zeros((
+        embedding_mx = np.zeros((
             len(self.dictionary)+2,  # two larger than dict for padding and unknown words
             embedding_vector_size
         ))
-        for w in self.embedding.wv.vocab: # iterate words that have a calculated word vector
-            embedding[self.dictionary.token2id[w]+1] = self.embedding.wv[w] # +1 as 0-index reserved for padding
+        for w in embedding.wv.vocab: # iterate words that have a calculated word vector
+            try: embedding_mx[self.dictionary.token2id[w]+1] = embedding.wv[w] # +1 as 0-index reserved for padding
+            except KeyError:
+                if w not in self.dictionary.token2id: continue
             
         # Build the model
         if model == 'simple':
@@ -900,7 +903,7 @@ class PubmedQueryResult(object):
             model.add(layers.Embedding(
                 input_dim=len(self.dictionary)+2, # two larger than dict for padding and unknown words
                 output_dim=embedding_vector_size, # embedding dimension -> vector size
-                weights=[embedding],
+                weights=[embedding_mx],
                 input_length=self.X.shape[1],
                 trainable=embedding_trainable
             ))
@@ -964,13 +967,14 @@ class PubmedQueryResult(object):
         
         return model
 
-    def nn_grid_search(self, external_embedding, epochs=5):
+    def nn_grid_search(self, external_embedding, epochs=5, n_jobs=5):
         """Comparing nn architectures and exploring
         hyperparamter combinations
 
         Args:
           external_embedding (gensim.embedding): External embedding to use in comparison.
           epochs (int): Neural network epochs.
+          n_jobs (int): Number of parallel jobs for executing grid.
         """
         from keras.wrappers.scikit_learn import KerasClassifier
         from sklearn.model_selection import RandomizedSearchCV
@@ -981,19 +985,20 @@ class PubmedQueryResult(object):
             num_filters=[32, 64, 128],
             kernel_size=[3, 5, 7],
             embedding=[self.embedding, external_embedding],
-            #maxlen=[maxlen],
+            embedding_trainable=[False, True],
+            model=['cnn'],
             return_model=[True]
         )
 
         model = KerasClassifier(
-            build_fn=create_model,
+            build_fn=self.nn_keras_predictor,
             epochs=epochs, batch_size=10,
             verbose=False
         )
 
         grid = RandomizedSearchCV(
             estimator=model, param_distributions=param_grid,
-            cv=4, verbose=1, n_iter=5
+            cv=4, verbose=1, n_iter=5, n_jobs=n_jobs
         )
 
         self.nn_grid_result = grid.fit(self.X, self.Y)
