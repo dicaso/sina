@@ -88,10 +88,11 @@ allcancers.nn_keras_predictor(textprep=False)
 
 for ct in cancertypes:
     print(ct)
+    corpora[ct].transform_text(preprocess=True,method='counts')
+    corpora[ct].analyze_mesh(topfreqs=topmesh,getmeshnames=True)
     corpora[ct].gensim_w2v(vecsize=w2vecsize,doclevel=True)
     corpora[ct].k_means_embedding(k=k_clusters)
-    corpora[ct].analyze_mesh(topfreqs=topmesh,getmeshnames=True)
-    corpora[ct].predict_meshterms(kmeans_only_freqs=False)
+    corpora[ct].predict_meshterms(mesh='svm', kmeans_only_freqs=False, rebalance='oversample')
     corpora[ct].nn_keras_predictor(textprep=False)
     
 docoverlap = np.zeros((len(cancertypes),len(cancertypes)))
@@ -100,4 +101,5 @@ for i,cti in enumerate(cancertypes):
         docoverlap[i,j] = len(corpora[cti].results.index.intersection(
           corpora[ctj].results.index))/len(corpora[cti].results.index)
 fig, ax = plt.subplots()
-plt.imshow(docoverlap)
+plt.imshow(docoverlap, cmap='viridis')
+plt.colorbar()

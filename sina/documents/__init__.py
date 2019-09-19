@@ -590,6 +590,7 @@ class PubmedQueryResult(object):
           **kwargs: Passed to method `preprocess_text`
         """
         import gensim, itertools as it
+        from keras import preprocessing
         
         # Text preprocessing
         if kwargs or preprocess:
@@ -606,6 +607,11 @@ class PubmedQueryResult(object):
             from sklearn.feature_extraction.text import TfidfTransformer
             self.tfidftransformer = TfidfTransformer(**tfid_kwargs)
             self.X = self.tfidftransformer.fit_transform(self.X)
+        elif method == 'idx':
+            self.results['idx'] = [           
+                self.dictionary.doc2idx(it.chain.from_iterable(doc)) for doc in self.results.processed
+            ]
+            self.X = preprocessing.sequence.pad_sequences(self.results.idx, padding='post', maxlen=500, value=-1)+1
             
         if self.testset:
              self.results_test['bow'] = [
@@ -614,6 +620,16 @@ class PubmedQueryResult(object):
              self.X_test = gensim.matutils.corpus2csc(self.results_test.bow, num_terms=len(self.dictionary)).T
              if method == 'tfid':
                  self.X_test = self.tfidftransformer.transform(self.X_test)
+             elif method == 'idx':
+                 self.results_test['idx'] = [           
+                    self.dictionary.doc2idx(
+                        it.chain.from_iterable(doc),
+                        unknown_word_index=len(self.dictionary)
+                        ) for doc in self.results_test.processed
+                 ]
+                 self.X_test = (
+                     preprocessing.sequence.pad_sequences(self.results_test.idx, padding='post', maxlen=500, value=-1)+1
+                 ).clip(max=len(self.dictionary)+2) # all unknown words get same value
 
     def analyze_mesh(self,topfreqs=20,getmeshnames=False):
         # wget ftp://nlmpubs.nlm.nih.gov/online/mesh/MESH_FILES/xmlmesh/desc2019.gz
@@ -784,6 +800,9 @@ class PubmedQueryResult(object):
             # Filter
             if kfilter:
                 from sklearn.feature_selection import SelectKBest, f_classif
+                #other options SelectPercentile or GenericUnivariateSelect for grid search
+                #For regression: f_regression, mutual_info_regression
+                #For classification: chi2, f_classif, mutual_info_classif
                 kfilter = SelectKBest(f_classif, k=k)
                 X_fil = kfilter.fit_transform(X_rsmpl, y)
                 X_fil_test = kfilter.transform(X_test)
@@ -818,13 +837,18 @@ class PubmedQueryResult(object):
         self.X_fil, self.X_fil_test = X_fil, X_fil_test
         self.kfilter = kfilter
 
-    def nn_keras_predictor(self, learning_rate=0.01, epochs=5, textprep=True, plothist=True):
+    def nn_keras_predictor(
+            self, model='simple', learning_rate=0.01, epochs=5,
+            embedding_trainable=False, textprep=False, plothist=True
+            ):
         """Implementing multi-label classification
         not multi-class classification
 
         Args:
+          model (str): 'simple', 'cnn'
           learning_rate (float): nn model learning rate.
           epochs (int): number of epochs.
+          embedding_trainable (bool): Embedding can be further optimized if true.
           textprep (bool): preprocess text with keras functions
           plothist (bool): plot the loss and accuracy training evolution.
         """
@@ -832,11 +856,10 @@ class PubmedQueryResult(object):
         from keras.models import Sequential
         from keras.layers import Dense, Activation, Dropout
         from keras.preprocessing import text, sequence
-        from keras import optimizers
-        from keras import utils
+        from keras import Input, layers, optimizers, utils
         import numpy as np, pandas as pd
         from sklearn import metrics
-        batch_size = 32
+        batch_size = 10#32
         #epochs = 5 # 2 seemed to small to get to good result, 10 too much
         #learning_rate = 0.01
         lr_decay = learning_rate/epochs # previously tested values: 1e-6
@@ -851,20 +874,45 @@ class PubmedQueryResult(object):
             self.X = sequence.pad_sequences(self.X, maxlen=max_len)
             self.X_test = tokenizer.texts_to_sequences(self.results_test.content)
             self.X_test = sequence.pad_sequences(self.X_test, maxlen=max_len)
+
+        # Prepare embedding matrix
+        embedding_vector_size = self.embedding.wv.vector_size
+        embedding = np.zeros((
+            len(self.dictionary)+2,  # two larger than dict for padding and unknown words
+            embedding_vector_size
+        ))
+        for w in self.embedding.wv.vocab: # iterate words that have a calculated word vector
+            embedding[self.dictionary.token2id[w]+1] = self.embedding.wv[w] # +1 as 0-index reserved for padding
             
         # Build the model
-        model = Sequential()
-        model.add(Dense(512, input_shape=(self.X.shape[1],)))
-        model.add(Activation('relu'))
-        model.add(Dropout(0.5))
-        model.add(Dense(self.Y.shape[1])) # number of classes
-        model.add(Activation('sigmoid')) # sigmoid instead of softmax for multi-label prediction
+        if model == 'simple':
+            model = Sequential()
+            model.add(Dense(512, input_shape=(self.X.shape[1],)))
+            model.add(Activation('relu'))
+            model.add(Dropout(0.5))
+            model.add(Dense(self.Y.shape[1])) # number of classes
+            model.add(Activation('sigmoid')) # sigmoid instead of softmax for multi-label prediction
+        elif model == 'cnn':
+            model = Sequential()
+            model.add(layers.Embedding(
+                input_dim=len(self.dictionary)+2, # two larger than dict for padding and unknown words
+                output_dim=embedding_vector_size, # embedding dimension -> vector size
+                weights=[embedding],
+                input_length=self.X.shape[1],
+                trainable=embedding_trainable
+            ))
+            model.add(layers.Conv1D(128, 5, activation='relu'))
+            model.add(layers.GlobalMaxPool1D()) #model.add(layers.Flatten())
+            model.add(layers.Dense(10, activation='relu'))
+            model.add(layers.Dense(self.Y.shape[1], activation='sigmoid'))
+            
 
-        sgd = optimizers.SGD(lr=learning_rate, decay=lr_decay, momentum=0.9, nesterov=True)
+        #sgd = optimizers.SGD(lr=learning_rate, decay=lr_decay, momentum=0.9, nesterov=True)
         #adam = optimizers.Adam(lr=learning_rate, decay=lr_decay)
         model.compile(loss='binary_crossentropy', #'binary_crossentropy' 'mean_squared_error' 'categorical_crossentropy', # categorical didn't give good results
-                    optimizer=sgd,#sgd, adam,
+                    optimizer='adam',#sgd, adam,
                     metrics=['accuracy'])
+        model.summary()
         
         mh = model.fit(
             self.X, self.Y,
