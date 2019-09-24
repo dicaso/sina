@@ -984,7 +984,8 @@ class PubmedQueryResult(object):
         param_grid = dict(
             num_filters=[32, 64, 128],
             kernel_size=[3, 5, 7],
-            embedding=[self.embedding, external_embedding],
+            embedding=[self.embedding] + external_embedding
+            if isinstance(external_embedding,list) else [external_embedding],
             embedding_trainable=[False, True],
             model=['cnn'],
             return_model=[True]

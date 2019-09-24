@@ -2,11 +2,17 @@
 ## Imports
 from sina.documents import PubmedCollection, PubmedQueryResult
 from collections import OrderedDict
-import numpy as np
+import numpy as np, os, time
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.rcParams['figure.max_open_warning'] = 50
-plt.ion()
+#plt.ion()
+
+saveloc = os.path.expanduser('~/Projects/topicmining/')+time.strftime("%Y%m%d-%H%M%S")
+os.mkdir(saveloc)
+def savefig(fig,filename):
+    fig.savefig(os.path.join(saveloc,filename+'.png'))
+    fig.savefig(os.path.join(saveloc,filename+'.pdf'))
 
 # ML/NN settings
 w2vecsize  = 100
@@ -47,7 +53,7 @@ cancertypes = OrderedDict((
     ('Thymoma', ()),
     ('Thyroid Papillary Carcinoma', ()),
     ('Uterine Carcinosarcoma', ()),
-    #('Uterine Corpus Endometrioid Carcinoma', ()), # no cases in pub testset
+    ('Uterine Corpus Endometrioid Carcinoma', ()), # no cases in pub testset
     ('Uveal Melanoma', ()),
 ))
 
@@ -58,7 +64,8 @@ corpora = {
     for ct in cancertypes
 }
 
-# Create PubmedQueryResult that merges all specific PubmedQueryResults
+# Generic embeddings
+## Create PubmedQueryResult that merges all specific PubmedQueryResults
 allcancers_training = pd.concat(
         [corpora[ct].results for ct in cancertypes],
         sort=False
@@ -80,23 +87,44 @@ allcancers = PubmedQueryResult(
     corpus = pmc
 )
 del allcancers_training, allcancers_testing
-allcancers.gensim_w2v(vecsize=w2vecsize,doclevel=True)
-allcancers.k_means_embedding(k=k_clusters)
-allcancers.analyze_mesh(topfreqs=topmesh,getmeshnames=True)
-allcancers.predict_meshterms(kmeans_only_freqs=False)
-allcancers.nn_keras_predictor(textprep=False)
+if os.path.exists(os.path.expanduser('~/tmp/allcancers.pickle')):
+    # to save time 
+    import pickle
+    allcancers.idcf, allcancers.embedding, allcancers.embedding_kmeans = pickle.load(open(os.path.expanduser('~/tmp/allcancers.pickle'),'rb'))
+else:
+    allcancers.gensim_w2v(vecsize=w2vecsize,doclevel=True)
+    allcancers.k_means_embedding(k=k_clusters)
+    allcancers.analyze_mesh(topfreqs=topmesh,getmeshnames=True)
+    allcancers.predict_meshterms(kmeans_only_freqs=False)
+    allcancers.nn_keras_predictor(textprep=False)
 
+## GloVe
+### download wiki trained glove
+glovepth = os.path.expanduser('~/tmp/glove.6B.zip')
+if not os.path.exists(glovepth):
+    import urllib.request
+    gloveurl = "http://nlp.stanford.edu/data/glove.6B.zip"
+    urllib.request.urlretrieve(gloveurl, glovepth)
+# Convert to gensim word2vec format
+with zipfile.ZipFile(glovepth) as zglove:
+    zglove.extract('glove.6B.100d.txt', os.path.dirname(glovepth))
+import gensim
+from gensim.scripts import glove2word2vec
+glove2word2vec.glove2word2vec(glovepth[:-3]+'100d.txt',glovepth[:-3]+'100d.w2v.txt')
+glovemdl = gensim.models.KeyedVectors.load_word2vec_format(glovepth[:-3]+'100d.w2v.txt')
+    
 for ct in cancertypes:
     print(ct)
-    corpora[ct].transform_text(preprocess=True,method='counts')
-    corpora[ct].analyze_mesh(topfreqs=topmesh,getmeshnames=True)
-    corpora[ct].gensim_w2v(vecsize=w2vecsize,doclevel=True)
-    corpora[ct].k_means_embedding(k=k_clusters)
+    corpora[ct].transform_text(preprocess=True,method='tfid')
+    corpora[ct].analyze_mesh(topfreqs=topmesh,getmeshnames=False) #TODO change code to execute on workstation
+    corpora[ct].gensim_w2v(vecsize=w2vecsize)
+    #corpora[ct].k_means_embedding(k=k_clusters)
     corpora[ct].predict_meshterms(mesh='svm', kmeans_only_freqs=False, rebalance='oversample')
     # Transform X for embedded processing
     corpora[ct].transform_text(method='idx')
     corpora[ct].nn_keras_predictor(model='cnn',embedding_trainable=False)
-    corpora[ct].nn_grid_search(qr_big.embedding, n_jobs=1)
+    print(corpora[ct].meshtop,corpora[ct].meshtop_nn,sep='\n')
+    corpora[ct].nn_grid_search([allcancers.embedding, glovemdl], n_jobs=1)
     
 docoverlap = np.zeros((len(cancertypes),len(cancertypes)))
 for i,cti in enumerate(cancertypes):
@@ -106,3 +134,4 @@ for i,cti in enumerate(cancertypes):
 fig, ax = plt.subplots()
 plt.imshow(docoverlap, cmap='viridis')
 plt.colorbar()
+savefig(fig,'corpora_overlap')
