@@ -2,7 +2,7 @@
 ## Imports
 from sina.documents import PubmedCollection, PubmedQueryResult
 from collections import OrderedDict
-import numpy as np, os, time
+import numpy as np, pandas as pd, os, time
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.rcParams['figure.max_open_warning'] = 50
