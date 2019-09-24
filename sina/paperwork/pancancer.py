@@ -14,15 +14,14 @@ def savefig(fig,filename):
     fig.savefig(os.path.join(saveloc,filename+'.png'))
     fig.savefig(os.path.join(saveloc,filename+'.pdf'))
 
-# Argparse
+# Argparse for ML/NN settings
 parser = argparse.ArgumentParser()
 parser.add_argument('--test', nargs='?', const=True)
+parser.add_argument('--w2vecsize', default = 100, type=int)
+parser.add_argument('--k_clusters', default = 100, type=int)
+parser.add_argument('--topmesh', default = 10, type=int)
+parser.add_argument('--getmeshnames', default=False, nargs='?', const=True)
 settings = parser.parse_args()
-
-# ML/NN settings
-w2vecsize  = 100
-k_clusters = 100
-topmesh    = 10
 
 ## cancertypes
 ## https://www.cancer.gov/about-nci/organization/ccg/research/structural-genomics/tcga/studied-cancers
@@ -100,9 +99,9 @@ if os.path.exists(os.path.expanduser('~/tmp/allcancers.pickle')):
     import pickle
     allcancers.idcf, allcancers.embedding, allcancers.embedding_kmeans = pickle.load(open(os.path.expanduser('~/tmp/allcancers.pickle'),'rb'))
 else:
-    allcancers.gensim_w2v(vecsize=w2vecsize,doclevel=True)
-    allcancers.k_means_embedding(k=k_clusters)
-    allcancers.analyze_mesh(topfreqs=topmesh,getmeshnames=True)
+    allcancers.gensim_w2v(vecsize=settings.w2vecsize)
+    allcancers.k_means_embedding(k=settings.k_clusters)
+    allcancers.analyze_mesh(topfreqs=settings.topmesh,getmeshnames=settings.getmeshnames)
     allcancers.predict_meshterms(kmeans_only_freqs=False)
     allcancers.nn_keras_predictor(textprep=False)
 
@@ -124,10 +123,10 @@ glovemdl = gensim.models.KeyedVectors.load_word2vec_format(glovepth[:-3]+'100d.w
 for ct in cancertypes:
     print(ct)
     corpora[ct].transform_text(preprocess=True,method='tfid')
-    corpora[ct].analyze_mesh(topfreqs=topmesh,getmeshnames=False) #TODO change code to execute on workstation
-    corpora[ct].gensim_w2v(vecsize=w2vecsize)
-    #corpora[ct].k_means_embedding(k=k_clusters)
-    corpora[ct].predict_meshterms(method='svm', kmeans_only_freqs=False, rebalance='oversample')
+    corpora[ct].analyze_mesh(topfreqs=topmesh,getmeshnames=settings.getmeshnames) #TODO change code to execute on workstation
+    corpora[ct].gensim_w2v(vecsize=settings.w2vecsize)
+    #corpora[ct].k_means_embedding(k=settings.k_clusters)
+    corpora[ct].predict_meshterms(model='svm', kmeans_only_freqs=False, rebalance='oversample')
     # Transform X for embedded processing
     corpora[ct].transform_text(method='idx')
     corpora[ct].nn_keras_predictor(model='cnn',embedding_trainable=False)
