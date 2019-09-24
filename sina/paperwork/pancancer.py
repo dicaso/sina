@@ -127,7 +127,7 @@ for ct in cancertypes:
     corpora[ct].analyze_mesh(topfreqs=topmesh,getmeshnames=False) #TODO change code to execute on workstation
     corpora[ct].gensim_w2v(vecsize=w2vecsize)
     #corpora[ct].k_means_embedding(k=k_clusters)
-    corpora[ct].predict_meshterms(mesh='svm', kmeans_only_freqs=False, rebalance='oversample')
+    corpora[ct].predict_meshterms(method='svm', kmeans_only_freqs=False, rebalance='oversample')
     # Transform X for embedded processing
     corpora[ct].transform_text(method='idx')
     corpora[ct].nn_keras_predictor(model='cnn',embedding_trainable=False)
