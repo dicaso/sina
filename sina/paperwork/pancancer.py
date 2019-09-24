@@ -2,7 +2,7 @@
 ## Imports
 from sina.documents import PubmedCollection, PubmedQueryResult
 from collections import OrderedDict
-import numpy as np, pandas as pd, os, time, zipfile
+import numpy as np, pandas as pd, os, time, zipfile, argparse
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.rcParams['figure.max_open_warning'] = 50
@@ -13,6 +13,11 @@ os.mkdir(saveloc)
 def savefig(fig,filename):
     fig.savefig(os.path.join(saveloc,filename+'.png'))
     fig.savefig(os.path.join(saveloc,filename+'.pdf'))
+
+# Argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--test', nargs='?', const=True)
+settings = parser.parse_args()
 
 # ML/NN settings
 w2vecsize  = 100
@@ -55,6 +60,9 @@ cancertypes = OrderedDict((
     ('Uterine Carcinosarcoma', ()),
     ('Uterine Corpus Endometrioid Carcinoma', ()), # no cases in pub testset
     ('Uveal Melanoma', ()),
+)) if not settings.test else OrderedDict((
+    ('Acute Myeloid Leukemia', ()),
+    ('Adrenocortical Carcinoma', ())
 ))
 
 # Load corpora
