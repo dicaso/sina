@@ -19,7 +19,7 @@ parser.add_argument('--getmeshnames', default=False, nargs='?', const=True)
 parser.add_argument('--outputdir')
 settings = parser.parse_args()
 
-saveloc = settings.outputdir | os.path.expanduser(
+saveloc = settings.outputdir or os.path.expanduser(
     '~/Projects/topicmining/')+time.strftime("%Y%m%d-%H%M%S")
 os.mkdir(saveloc)
 def savefig(fig,filename):
