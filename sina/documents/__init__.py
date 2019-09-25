@@ -25,7 +25,7 @@ PubmedCollection:
 """
 from abc import ABC, abstractmethod
 from sina.documents.utils import default_retmax, valid_date
-import requests, os, glob, gzip
+import logging, requests, os, glob, gzip
 import xml.sax
 import xml.etree.ElementTree as ET
 
@@ -631,8 +631,14 @@ class PubmedQueryResult(object):
                      preprocessing.sequence.pad_sequences(self.results_test.idx, padding='post', maxlen=500, value=-1)+1
                  ).clip(max=len(self.dictionary)+2) # all unknown words get same value
 
-    def analyze_mesh(self,topfreqs=20,getmeshnames=False):
-        # wget ftp://nlmpubs.nlm.nih.gov/online/mesh/MESH_FILES/xmlmesh/desc2019.gz
+    def analyze_mesh(self,topfreqs=20,getmeshnames=True):
+        """Retrieves mesh terms for all documents
+        and count the most frequent ones.
+
+        Args:
+          topfreqs (int): The top frequent mesh terms to include in the mesh table.
+          getmeshnames (bool): Include human readable name of mesh terms.
+        """
         from collections import Counter
         import shelve, pandas as pd
         shards = sorted(glob.glob(os.path.join(self.corpus.location,'.index/*')))
@@ -652,8 +658,20 @@ class PubmedQueryResult(object):
         )
         self.topfreqs = topfreqs
         if getmeshnames:
-            import gzip, xml.etree.ElementTree as ET
-            with gzip.open('/home/mint/LSData/private/desc2019.gz') as xmlfilehandle:
+            # wget ftp://nlmpubs.nlm.nih.gov/online/mesh/MESH_FILES/xmlmesh/desc2019.gz
+            import gzip, sina.config, xml.etree.ElementTree as ET
+            meshfile = os.path.join(sina.config.appdirs.user_data_dir,'meshterms2019.gz')
+            if not os.path.exists(meshfile):
+                from ftplib import FTP
+                ftp = FTP('nlmpubs.nlm.nih.gov')
+                ftp.login(user='anonymous')
+                ftp.cwd('/online/mesh/MESH_FILES/xmlmesh/')
+                logging.info('downloading mesh terms table file form nih.gov...')
+                with open(meshfile, 'wb') as localfile:
+                    ftp.retrbinary('RETR desc2019.gz', localfile.write, 1024)
+                ftp.quit()
+                logging.info('download completed')
+            with gzip.open(meshfile) as xmlfilehandle:
                 xml = ET.parse(xmlfilehandle)
                 root = xml.getroot()
                 self.meshtop['meshname'] = self.meshtop.meshid.apply(

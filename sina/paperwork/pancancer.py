@@ -1,6 +1,7 @@
 # For pan-cancer research paper on importance of custom word embeddings
 ## Imports
 from sina.documents import PubmedCollection, PubmedQueryResult
+import sina.config
 from collections import OrderedDict
 import numpy as np, pandas as pd
 import logging, os, time, zipfile, argparse
@@ -12,10 +13,10 @@ matplotlib.rcParams['figure.max_open_warning'] = 50
 # Argparse for ML/NN settings
 parser = argparse.ArgumentParser()
 parser.add_argument('--test', nargs='?', const=True)
+parser.add_argument('--debug', nargs='?', const=True, default=False)
 parser.add_argument('--w2vecsize', default = 100, type=int)
 parser.add_argument('--k_clusters', default = 100, type=int)
 parser.add_argument('--topmesh', default = 10, type=int)
-parser.add_argument('--getmeshnames', default=False, nargs='?', const=True)
 parser.add_argument('--outputdir')
 settings = parser.parse_args()
 
@@ -28,13 +29,13 @@ def savefig(fig,filename):
 
 # Logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.DEBUG if settings.debug else logging.INFO,
     #filename=os.path.join(saveloc,'sina.log'), filemode='w',
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler(os.path.join(saveloc,'sina.log'))
     ],
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(levelname)s @ %(name)s [%(asctime)s] %(message)s'
 )
     
 ## cancertypes
@@ -116,15 +117,18 @@ if os.path.exists(os.path.expanduser('~/tmp/allcancers.pickle')):
     allcancers.idcf, allcancers.embedding, allcancers.embedding_kmeans = pickle.load(open(os.path.expanduser('~/tmp/allcancers.pickle'),'rb'))
 else:
     allcancers.gensim_w2v(vecsize=settings.w2vecsize)
-    allcancers.k_means_embedding(k=settings.k_clusters)
-    allcancers.analyze_mesh(topfreqs=settings.topmesh,getmeshnames=settings.getmeshnames)
+    #allcancers.k_means_embedding(k=settings.k_clusters)
+    allcancers.analyze_mesh(topfreqs=settings.topmesh)
     allcancers.predict_meshterms(kmeans_only_freqs=False)
-    allcancers.nn_keras_predictor(textprep=False)
+    allcancers.nn_keras_predictor(model='cnn',embedding_trainable=False)
 
 ## GloVe
 logging.info('preparing glove embedding')
 ### download wiki trained glove
-glovepth = os.path.expanduser('~/tmp/glove.6B.zip')
+glovepth = os.path.join(
+    sina.config.appdirs.user_data_dir,
+    'glove.6B.zip'
+)
 if not os.path.exists(glovepth):
     import urllib.request
     gloveurl = "http://nlp.stanford.edu/data/glove.6B.zip"
@@ -140,7 +144,7 @@ glovemdl = gensim.models.KeyedVectors.load_word2vec_format(glovepth[:-3]+'100d.w
 for ct in cancertypes:
     logging.info(ct)
     corpora[ct].transform_text(preprocess=True,method='tfid')
-    corpora[ct].analyze_mesh(topfreqs=settings.topmesh,getmeshnames=settings.getmeshnames) #TODO change code to execute on workstation
+    corpora[ct].analyze_mesh(topfreqs=settings.topmesh)
     corpora[ct].gensim_w2v(vecsize=settings.w2vecsize)
     #corpora[ct].k_means_embedding(k=settings.k_clusters)
     corpora[ct].predict_meshterms(model='svm', kmeans_only_freqs=False, rebalance='oversample')
@@ -149,6 +153,7 @@ for ct in cancertypes:
     corpora[ct].nn_keras_predictor(model='cnn',embedding_trainable=False)
     print(corpora[ct].meshtop,corpora[ct].meshtop_nn,sep='\n')
     corpora[ct].nn_grid_search([allcancers.embedding, glovemdl], n_jobs=1)
+    # embedding by adding an external vector
     
 docoverlap = np.zeros((len(cancertypes),len(cancertypes)))
 for i,cti in enumerate(cancertypes):
@@ -188,10 +193,11 @@ savefig(fig,'corpus_size')
 from scipy import stats
 cscores = [corpora[ct].nn_grid_result.best_score_ for ct in customs]
 gscores = [corpora[ct].nn_grid_result.best_score_ for ct in generics]
-print(
-    'generic mean+var', np.mean(gscores), np.var(gscores),
-    '\ncustom mean+var', np.mean(cscores), np.var(cscores),
-    '\nttest', stats.ttest_ind(cscores, gscores)    
+logging.info(
+    'generic mean+var %s (%s)\ncustom mean+var %s (%s)\nttest %s',
+    np.mean(gscores), np.var(gscores),
+    np.mean(cscores), np.var(cscores),
+    stats.ttest_ind(cscores, gscores)    
 )
 
 # Maximum overlap with other corpus
@@ -202,6 +208,7 @@ ax.legend()
 ax.set_title('Corpus size and maximum overlap with other corpora')
 ax.set_xlabel('Corpus size (#)')
 ax.set_ylabel('Maximum overlap with other corpus (%)')
+savefig(fig,'corpus_size_overlap')
 
 #3d
 # from mpl_toolkits.mplot3d import Axes3D
@@ -222,3 +229,4 @@ ax.legend()
 ax.set_title('Overlap and score')
 ax.set_ylabel('NN score')
 ax.set_xlabel('Maximum overlap with other corpus (%)')
+savefig(fig,'overlap_score')
