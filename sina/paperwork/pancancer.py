@@ -208,16 +208,19 @@ if __name__ == '__main__':
         
         customs = []
         generics = []
+        gloves = []
         for ct in cancertypes:
             corpus = corpora[ct]
             print(
                 ct,
                 len(corpus.results),
                 'generic embedding' if corpus.nn_grid_result.best_params_['embedding'] is allcancers.embedding 
-                else 'custom embedding'
+                else ('glove embedding' if corpus.nn_grid_result.best_params_['embedding'] is glovemdl else 'custom embedding')
             )
             if corpus.nn_grid_result.best_params_['embedding'] is allcancers.embedding:
                 generics.append(ct)
+            elif corpus.nn_grid_result.best_params_['embedding'] is glovemdl:
+                gloves.append(ct)
             else:
                 customs.append(ct)
         
@@ -225,6 +228,7 @@ if __name__ == '__main__':
         fig, ax = plt.subplots()
         ax.scatter([len(corpora[ct].results) for ct in generics], [0]*len(generics), label='generic')
         ax.scatter([len(corpora[ct].results) for ct in customs], [1]*len(customs), label='custom')
+        ax.scatter([len(corpora[ct].results) for ct in gloves], [2]*len(gloves), label='glove')
         ax.legend()
         ax.set_title('Corpus size and the relevance of a custom embedding')
         ax.set_xlabel('Corpus size (#)')
@@ -234,12 +238,23 @@ if __name__ == '__main__':
         from scipy import stats
         cscores = [corpora[ct].nn_grid_result.best_score_ for ct in customs]
         gscores = [corpora[ct].nn_grid_result.best_score_ for ct in generics]
+        glscores = [corpora[ct].nn_grid_result.best_score_ for ct in gloves]
         logging.info(
-            'generic mean+var %s (%s)\ncustom mean+var %s (%s)\nttest %s',
+            'generic mean+var %s (%s)\ncustom mean+var %s (%s)\nglove mean+var %s (%s)\nttest %s',
             np.mean(gscores), np.var(gscores),
             np.mean(cscores), np.var(cscores),
-            stats.ttest_ind(cscores, gscores)    
+            np.mean(glscores), np.var(glscores),
+            stats.f_oneway(cscores, gscores, glscores) #stats.ttest_ind(cscores, gscores)    
         )
+
+        # Score vs size
+        fig, ax = plt.subplots()
+        ax.scatter(gscores,[len(corpora[ct].results) for ct in generics],label='generic')
+        ax.scatter(cscores,[len(corpora[ct].results) for ct in customs],label='custom')
+        ax.scatter(glscores,[len(corpora[ct].results) for ct in gloves],label='glove')
+        ax.set_xlabel('NN score')
+        ax.set_ylabel('Corpus size (#)')
+        savefig(fig,'score_vs_corpus_size')
         
         # Maximum overlap with other corpus
         fig, ax = plt.subplots()

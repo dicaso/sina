@@ -985,18 +985,22 @@ class PubmedQueryResult(object):
         
         return model
 
-    def nn_grid_search(self, external_embedding, epochs=5, n_jobs=5):
+    def nn_grid_search(self, external_embedding, epochs=5,
+                       randomized_search=False, n_jobs=5):
         """Comparing nn architectures and exploring
         hyperparamter combinations
 
         Args:
           external_embedding (gensim.embedding): External embedding to use in comparison.
           epochs (int): Neural network epochs.
+          randomized_search (int): False or int indicating amount of
+            parameter combinations to search (e.g. 10)
           n_jobs (int): Number of parallel jobs for executing grid.
         """
         from keras.wrappers.scikit_learn import KerasClassifier
-        from sklearn.model_selection import RandomizedSearchCV
-
+        from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+        import numpy as np
+        
         print('Grid search for embeddings/hyperparameters')
         # Parameter grid for grid search
         param_grid = dict(
@@ -1017,7 +1021,10 @@ class PubmedQueryResult(object):
 
         grid = RandomizedSearchCV(
             estimator=model, param_distributions=param_grid,
-            cv=4, verbose=1, n_iter=5, n_jobs=n_jobs
+            cv=4, verbose=1, n_iter=randomized_search, n_jobs=n_jobs
+        ) if randomized_search else GridSearchCV(
+            estimator=model, param_grid=param_grid,
+            cv=4, verbose=1, n_jobs=n_jobs
         )
 
         self.nn_grid_result = grid.fit(self.X, self.Y)
@@ -1029,6 +1036,20 @@ class PubmedQueryResult(object):
                 test_accuracy
             )
         )
+
+        # Calculate std deviation on grid results that have same
+        # settings except for embedding
+        self.nn_grid_embedding_std =  np.std(
+            self.nn_grid_result.cv_results_['mean_test_score'][
+                # Selector best settings except for embedding
+                (self.nn_grid_result.cv_results_['param_embedding_trainable'] ==
+                     self.nn_grid_result.best_params_['embedding_trainable']) &
+                (self.nn_grid_result.cv_results_['param_kernel_size'] ==
+                     self.nn_grid_result.best_params_['kernel_size']) &
+                (self.nn_grid_result.cv_results_['param_num_filters'] ==
+                     self.nn_grid_result.best_params_['num_filters'])
+                ]
+            )
         
     def gensim_w2v(self, vecsize=100):
         """Build word2vec model with gensim
