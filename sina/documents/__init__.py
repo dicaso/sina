@@ -666,9 +666,15 @@ class PubmedQueryResult(object):
                 ftp = FTP('nlmpubs.nlm.nih.gov')
                 ftp.login(user='anonymous')
                 ftp.cwd('/online/mesh/MESH_FILES/xmlmesh/')
-                logging.info('downloading mesh terms table file form nih.gov...')
+                for rfile in ftp.nlst():
+                    # searching for file with filename descXXXX.gz
+                    if rfile.startswith('desc') and rfile.endswith('.gz') and len(rfile)==11:
+                        rmeshfile = rfile
+                        break
+                # if rmeshfile not found will raise exception here
+                logging.info('downloading mesh terms table file %s form nih.gov...', rmeshfile)
                 with open(meshfile, 'wb') as localfile:
-                    ftp.retrbinary('RETR desc2019.gz', localfile.write, 1024)
+                    ftp.retrbinary('RETR '+rmeshfile, localfile.write, 1024)
                 ftp.quit()
                 logging.info('download completed')
             with gzip.open(meshfile) as xmlfilehandle:
