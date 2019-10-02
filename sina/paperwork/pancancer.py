@@ -1,5 +1,13 @@
 # For pan-cancer research paper on importance of custom word embeddings
 ## Imports
+## matplotlib import that needs to run before all else
+import matplotlib
+if __name__ == '__main__': # in interactive case
+    matplotlib.rcParams['figure.max_open_warning'] = 50
+else: # for headless subprocesses in multiprocessing
+    matplotlib.use('pdf')
+    
+## general
 from sina.documents import PubmedCollection, PubmedQueryResult
 import sina.config
 from collections import OrderedDict
@@ -7,11 +15,10 @@ import numpy as np, pandas as pd
 import logging, os, time, zipfile, argparse, shutil, shelve
 import gensim
 import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.rcParams['figure.max_open_warning'] = 50
 import dill as pickle
 
-def corpus_workflow(cancertype,corpus,settings,ext_embeddings):
+def corpus_workflow(corpus,settings,ext_embeddings):
+    cancertype, corpus = corpus
     logging.info(cancertype)
     corpus.transform_text(preprocess=True,method='tfid')
     corpus.analyze_mesh(topfreqs=settings.topmesh)
@@ -24,7 +31,7 @@ def corpus_workflow(cancertype,corpus,settings,ext_embeddings):
     print(corpus.meshtop,corpus.meshtop_nn,sep='\n')
     corpus.nn_grid_search(ext_embeddings, n_jobs=1)
     # embedding by adding an external vector
-    return corpus
+    return (cancertype, corpus)
 
 if __name__ == '__main__':
     # Argparse
@@ -81,6 +88,7 @@ if __name__ == '__main__':
         ],
         format='%(levelname)s @ %(name)s [%(asctime)s] %(message)s'
     )
+    if mainprocess: logging.info('Settings: %s', settings)
         
     ## cancertypes
     ## https://www.cancer.gov/about-nci/organization/ccg/research/structural-genomics/tcga/studied-cancers
@@ -207,12 +215,21 @@ if __name__ == '__main__':
     # Multiprocessing logic
     if mainprocess and settings.parallel and settings.parallel_mode == 'multiprocessing':
         import multiprocessing as mp
-        if settings.parallel == -1: settings.parallel = len(cancertypes)
-        
+        from functools import partial
+        logging.info('starting pool of %s workers', settings.parallel)
+        with mp.Pool(
+                len(cancertypes) if settings.parallel == -1 else settings.parallel
+                ) as pool:
+            corpora = dict(pool.map(
+                partial(
+                    corpus_workflow, settings=settings,
+                    ext_embeddings=[allcancers.embedding, glovemdl]),
+                corpora.items()
+            ))
     else: #execute everythin with one CPU
         for ct in cancertypes:
             corpus_workflow(
-                cancertype=ct,corpus=corpora[ct],settings=settings,
+                corpus=(ct,corpora[ct]),settings=settings,
                 ext_embeddings=[allcancers.embedding, glovemdl]
             )
 
