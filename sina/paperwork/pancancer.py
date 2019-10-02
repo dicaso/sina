@@ -24,6 +24,7 @@ def corpus_workflow(cancertype,corpus,settings,ext_embeddings):
     print(corpus.meshtop,corpus.meshtop_nn,sep='\n')
     corpus.nn_grid_search(ext_embeddings, n_jobs=1)
     # embedding by adding an external vector
+    return corpus
 
 if __name__ == '__main__':
     # Argparse
@@ -33,7 +34,7 @@ if __name__ == '__main__':
     parser.add_argument('--clearcache', nargs='?', const=True)
     parser.add_argument('--debug', nargs='?', const=True, default=False)
     parser.add_argument('--interactive', nargs='?', const=True, default=False)
-    parser.add_argument('--parallel', type=int)
+    parser.add_argument('--parallel', type=int) # if ==-1 use one CPU/cancertype
     parser.add_argument('--parallel-mode', default='multiprocessing') # options multiprocessing, slurm
     parser.add_argument('--parallel-job-id', type=int)     # only if --parallel-mode slurm
     ## ML/NN settings
@@ -202,12 +203,18 @@ if __name__ == '__main__':
         from gensim.scripts import glove2word2vec
         glove2word2vec.glove2word2vec(glovepth[:-3]+'100d.txt',glovepth[:-3]+'100d.w2v.txt')
     glovemdl = gensim.models.KeyedVectors.load_word2vec_format(glovepth[:-3]+'100d.w2v.txt')
+
+    # Multiprocessing logic
+    if mainprocess and settings.parallel and settings.parallel_mode == 'multiprocessing':
+        import multiprocessing as mp
+        if settings.parallel == -1: settings.parallel = len(cancertypes)
         
-    for ct in cancertypes:
-        corpus_workflow(
-            cancertype=ct,corpus=corpora[ct],settings=settings,
-            ext_embeddings=[allcancers.embedding, glovemdl]
-        )
+    else: #execute everythin with one CPU
+        for ct in cancertypes:
+            corpus_workflow(
+                cancertype=ct,corpus=corpora[ct],settings=settings,
+                ext_embeddings=[allcancers.embedding, glovemdl]
+            )
 
     if mainprocess:
         docoverlap = np.zeros((len(cancertypes),len(cancertypes)))
