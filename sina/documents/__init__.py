@@ -492,8 +492,9 @@ class PubmedQueryResult(object):
       test_fraction (float, pd.DataFrame): If float provided a random subset equaling test_fraction
         is set apart for testing purposes after machine learning tasks downstream. Can also be provided
         as `DataFrame` directly, which is useful if you need to control test cases for comparitive purposes.
+      saveloc (str): If provided, dir where figures and other output are saved.
     """
-    def __init__(self, corpus, results, test_fraction=.25):
+    def __init__(self, corpus, results, test_fraction=.25, saveloc=False):
         import pandas as pd, warnings
         self.results = pd.DataFrame(results).set_index('pmid')
         duplicates = self.results.index.duplicated().sum()
@@ -513,6 +514,8 @@ class PubmedQueryResult(object):
             self.results, self.results_test = train_test_split(self.results, test_size=test_fraction)
             self.testset = True
         else: self.testset = False
+        self.saveloc = saveloc
+        if not os.path.exists(self.saveloc): os.mkdir(self.saveloc)
 
     def preprocess_text(self, title2content=True, bigrams=2, split_hyphens=False):
         """Preprocessing text, steps involving tokenizations and decisions on bigrams.
@@ -988,7 +991,7 @@ class PubmedQueryResult(object):
             ax.set_xlabel("Epoch #")
             ax.set_ylabel("Loss/Accuracy")
             ax.legend(loc="upper left")
-        
+            if self.saveloc: fig.savefig(os.path.join(self.saveloc,'train_history.pdf'))
         return model
 
     def nn_grid_search(self, external_embedding, epochs=5,
@@ -1093,7 +1096,8 @@ class PubmedQueryResult(object):
                  verticalalignment='bottom',
                  size='medium',
             ).set_size(15)
-
+        if self.saveloc: fig.savefig(os.path.join(self.saveloc,'embedding.pdf'))
+            
         self.embedding = w2model
         return w2model
 
@@ -1312,5 +1316,6 @@ class PubmedQueryResult(object):
                 ).set_size(15)
             ## legend
             ax.legend()
-            
+            if self.saveloc: fig.savefig(os.path.join(self.saveloc,'projection.pdf'))
+                
         return projfunc

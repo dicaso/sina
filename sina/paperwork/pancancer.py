@@ -11,6 +11,20 @@ import matplotlib
 matplotlib.rcParams['figure.max_open_warning'] = 50
 import dill as pickle
 
+def corpus_workflow(cancertype,corpus,settings,ext_embeddings):
+    logging.info(cancertype)
+    corpus.transform_text(preprocess=True,method='tfid')
+    corpus.analyze_mesh(topfreqs=settings.topmesh)
+    corpus.gensim_w2v(vecsize=settings.w2vecsize)
+    #corpus.k_means_embedding(k=settings.k_clusters)
+    corpus.predict_meshterms(model='svm', kmeans_only_freqs=False, rebalance='oversample')
+    # Transform X for embedded processing
+    corpus.transform_text(method='idx')
+    corpus.nn_keras_predictor(model='cnn',embedding_trainable=False)
+    print(corpus.meshtop,corpus.meshtop_nn,sep='\n')
+    corpus.nn_grid_search(ext_embeddings, n_jobs=1)
+    # embedding by adding an external vector
+
 if __name__ == '__main__':
     # Argparse
     parser = argparse.ArgumentParser()
@@ -18,6 +32,7 @@ if __name__ == '__main__':
     parser.add_argument('--test', nargs='?', const=True)
     parser.add_argument('--clearcache', nargs='?', const=True)
     parser.add_argument('--debug', nargs='?', const=True, default=False)
+    parser.add_argument('--interactive', nargs='?', const=True, default=False)
     parser.add_argument('--parallel', type=int)
     parser.add_argument('--parallel-mode', default='multiprocessing') # options multiprocessing, slurm
     parser.add_argument('--parallel-job-id', type=int)     # only if --parallel-mode slurm
@@ -30,6 +45,10 @@ if __name__ == '__main__':
 
     # Set mainprocess to True if not a child process
     mainprocess = not settings.parallel_job_id
+
+    # matplotlib interactive
+    if mainprocess and not settings.interactive:
+        matplotlib.use('pdf')
     
     # Prepare outputdir
     saveloc = settings.outputdir or os.path.join(
@@ -46,7 +65,7 @@ if __name__ == '__main__':
     
     # Prepare cache dir
     cachedir = sina.config.appdirs.user_cache_dir
-    if (settings.clearcache and os.path.exists(cachedir) and
+    if (mainprocess and settings.clearcache and os.path.exists(cachedir) and
             not settings.parallel_job_id):
         shutil.rmtree(cachedir)
     if not os.path.exists(cachedir): os.mkdir(cachedir)
@@ -116,8 +135,10 @@ if __name__ == '__main__':
         logging.info('Loading pubmed collection')
         pmc = PubmedCollection('pubmed','~/pubmed')
         corpora = {
-            ct: PubmedQueryResult(results=pmc.query_document_index(ct),corpus=pmc)
-            for ct in cancertypes
+            ct: PubmedQueryResult(
+                results=pmc.query_document_index(ct),corpus=pmc,
+                saveloc = os.path.join(saveloc, ct.replace(' ',''))
+            ) for ct in cancertypes
         }
         corpora_shelve = shelve.open(os.path.join(cachedir, 'corpora.shlv'))
         for ct in corpora: corpora_shelve[ct] = corpora[ct]
@@ -146,7 +167,8 @@ if __name__ == '__main__':
         allcancers = PubmedQueryResult(
             results = allcancers_training,
             test_fraction = allcancers_testing,
-            corpus = pmc
+            corpus = pmc,
+            saveloc = os.path.join(saveloc, 'all_combined')
         )
         del allcancers_training, allcancers_testing
         # Process allcancers in the same way as subcorpora
@@ -182,18 +204,10 @@ if __name__ == '__main__':
     glovemdl = gensim.models.KeyedVectors.load_word2vec_format(glovepth[:-3]+'100d.w2v.txt')
         
     for ct in cancertypes:
-        logging.info(ct)
-        corpora[ct].transform_text(preprocess=True,method='tfid')
-        corpora[ct].analyze_mesh(topfreqs=settings.topmesh)
-        corpora[ct].gensim_w2v(vecsize=settings.w2vecsize)
-        #corpora[ct].k_means_embedding(k=settings.k_clusters)
-        corpora[ct].predict_meshterms(model='svm', kmeans_only_freqs=False, rebalance='oversample')
-        # Transform X for embedded processing
-        corpora[ct].transform_text(method='idx')
-        corpora[ct].nn_keras_predictor(model='cnn',embedding_trainable=False)
-        print(corpora[ct].meshtop,corpora[ct].meshtop_nn,sep='\n')
-        corpora[ct].nn_grid_search([allcancers.embedding, glovemdl], n_jobs=1)
-        # embedding by adding an external vector
+        corpus_workflow(
+            cancertype=ct,corpus=corpora[ct],settings=settings,
+            ext_embeddings=[allcancers.embedding, glovemdl]
+        )
 
     if mainprocess:
         docoverlap = np.zeros((len(cancertypes),len(cancertypes)))
