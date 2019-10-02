@@ -593,7 +593,7 @@ class PubmedQueryResult(object):
           **kwargs: Passed to method `preprocess_text`
         """
         import gensim, itertools as it
-        from keras import preprocessing
+        from tensorflow.keras import preprocessing
         
         # Text preprocessing
         if kwargs or preprocess:
@@ -885,10 +885,10 @@ class PubmedQueryResult(object):
           return_model (bool): If true, just return model; used for grid search.
         """
         import tensorflow as tf
-        from keras.models import Sequential
-        from keras.layers import Dense, Activation, Dropout
-        from keras.preprocessing import text, sequence
-        from keras import Input, layers, optimizers, utils
+        from tensorflow.keras.models import Sequential
+        from tensorflow.keras.layers import Dense, Activation, Dropout
+        from tensorflow.keras.preprocessing import text, sequence
+        from tensorflow.keras import Input, layers, optimizers, utils
         import numpy as np, pandas as pd
         from sklearn import metrics
         #learning_rate = 0.01
@@ -1006,7 +1006,7 @@ class PubmedQueryResult(object):
             parameter combinations to search (e.g. 10)
           n_jobs (int): Number of parallel jobs for executing grid.
         """
-        from keras.wrappers.scikit_learn import KerasClassifier
+        from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
         from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
         import numpy as np
         
