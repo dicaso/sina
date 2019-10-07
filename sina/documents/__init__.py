@@ -1013,8 +1013,8 @@ class PubmedQueryResult(object):
         print('Grid search for embeddings/hyperparameters')
         # Parameter grid for grid search
         param_grid = dict(
-            num_filters=[32, 64, 128],
-            kernel_size=[3, 5, 7],
+            num_filters=[64, 128], # only selected two out of [32, 64, 128] to limit combis
+            kernel_size=[5, 7], # only selected two out of [3, 5, 7] to limit combis
             embedding=[self.embedding] + external_embedding
             if isinstance(external_embedding,list) else [external_embedding],
             embedding_trainable=[False, True],

@@ -30,6 +30,7 @@ def corpus_workflow(corpus,settings,ext_embeddings):
     corpus.nn_keras_predictor(model='cnn',embedding_trainable=False)
     print(corpus.meshtop,corpus.meshtop_nn,sep='\n')
     corpus.nn_grid_search(ext_embeddings, n_jobs=1)
+    logging.info('best result %s', corpus.nn_grid_result.best_params_)
     # embedding by adding an external vector
     return (cancertype, corpus)
 
@@ -191,6 +192,7 @@ if __name__ == '__main__':
             allcancers,
             open(os.path.join(cachedir,'allcancers.pckl'),'wb')
         )
+        logging.info('combined cancers embedding %s', allcancers.embedding)
     else:
         allcancers = pickle.load(open(os.path.join(cachedir,'allcancers.pckl'),'rb'))
     
@@ -211,7 +213,8 @@ if __name__ == '__main__':
         from gensim.scripts import glove2word2vec
         glove2word2vec.glove2word2vec(glovepth[:-3]+'100d.txt',glovepth[:-3]+'100d.w2v.txt')
     glovemdl = gensim.models.KeyedVectors.load_word2vec_format(glovepth[:-3]+'100d.w2v.txt')
-
+    logging.info('glove embedding %s', glovemdl)
+    
     # Multiprocessing logic
     if mainprocess and settings.parallel and settings.parallel_mode == 'multiprocessing':
         import multiprocessing as mp
