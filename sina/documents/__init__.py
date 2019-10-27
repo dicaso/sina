@@ -25,14 +25,30 @@ PubmedCollection:
 """
 from abc import ABC, abstractmethod
 from sina.documents.utils import default_retmax, valid_date
+import sina.config
 import logging, requests, os, glob, gzip
 import xml.sax
 import xml.etree.ElementTree as ET
 
 class BaseDocumentCollection(ABC):
-    def __init__(self, name, location, remote=None, startTime=None, endTime=None, timeUnit=1):
-        self.name = name
-        self.location = os.path.expanduser(location)
+    """Base class for document collections
+    
+    Args:
+        name (str): Name for the collection. If not provided will be class name
+          in lowercase with 'collection' removed from the name.
+        location (str): Where to store in filesystem. If not provided will be
+          stored under `sina.config.appdirs.user_data_dir`/`name` subfolder.
+        remote (str): Remote location.
+        startTime, endTime, timeUnit -> not yet implemented but should be provided
+          for selecting time segments of documents.
+    """
+    
+    def __init__(self, name=None, location=None, remote=None,
+                 startTime=None, endTime=None, timeUnit=1):
+        self.name = name or self.__class__.__name__.lower().replace('collection','')
+        self.location = os.path.expanduser(location) if location else os.path.join(
+            sina.config.appdirs.user_data_dir, self.name
+        )
         self.remote = remote
         self.start = startTime
         self.end = endTime
@@ -58,7 +74,7 @@ class BaseDocumentCollection(ABC):
 class PubmedCollection(BaseDocumentCollection):
     """Example:
 
-    >>> pmc = PubmedCollection('pubmed','~/pubmed')
+    >>> pmc = PubmedCollection('pubmed')
     >>> pmc.retrieve_documents()
     """
     def retrieve_documents(self,ftplocation='pubmed/baseline',check_md5=False):
@@ -442,7 +458,7 @@ class PubmedCollection(BaseDocumentCollection):
 class PubmedCentralCollection(BaseDocumentCollection):
     """Example:
 
-    >>> pmc = PubmedCentralCollection('pubmedcentral','~/pubmedcentral')
+    >>> pmc = PubmedCentralCollection('pubmedcentral')
     >>> pmc.retrieve_documents()
     """
     def retrieve_documents(self):
@@ -705,7 +721,6 @@ class PubmedQueryResult(object):
             # Direct links to the arrays for prediction algorithms
             self.Y = self.meshtabel.values
             self.Y_test = self.meshtabel_test.values
-
 
     def predict_meshterms(
             self, method='kmeans_summ', kfilter=100, model='bayes', idcf= False,

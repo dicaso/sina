@@ -43,17 +43,17 @@ if __name__ == '__main__':
     parser.add_argument('--debug', nargs='?', const=True, default=False)
     parser.add_argument('--interactive', nargs='?', const=True, default=False)
     parser.add_argument('--parallel', type=int) # if ==-1 use one CPU/cancertype
-    parser.add_argument('--parallel-mode', default='multiprocessing') # options multiprocessing, slurm
-    parser.add_argument('--parallel-job-id', type=int)     # only if --parallel-mode slurm
+    parser.add_argument('--parallel-mode', default='multiprocessing') # options multiprocessing, slurm (there are other options but not intended to be started by a user)
     ## ML/NN settings
     parser.add_argument('--w2vecsize', default = 100, type=int)
     parser.add_argument('--k_clusters', default = 100, type=int)
     parser.add_argument('--topmesh', default = 10, type=int)
+    parser.add_argument('--downsample-evolution', nargs='?', const=True, default=False)
     parser.add_argument('--outputdir')
     settings = parser.parse_args()
 
     # Set mainprocess to True if not a child process
-    mainprocess = not settings.parallel_job_id
+    mainprocess = not os.environ.get('SLURM_ARRAY_TASK_ID')
 
     # matplotlib interactive
     if mainprocess and not settings.interactive:
@@ -65,6 +65,9 @@ if __name__ == '__main__':
         'topicmining',
         time.strftime("%Y%m%d-%H%M%S")
     )
+    if '.local' in saveloc:
+        print('Results will be saved in', saveloc)
+        print('To save in other dir relative to `.local` set env var `XDG_DATA_HOME`')
     if not os.path.exists(saveloc):
         os.makedirs(saveloc)
         print('created dir', saveloc)
@@ -74,8 +77,7 @@ if __name__ == '__main__':
     
     # Prepare cache dir
     cachedir = sina.config.appdirs.user_cache_dir
-    if (mainprocess and settings.clearcache and os.path.exists(cachedir) and
-            not settings.parallel_job_id):
+    if mainprocess and settings.clearcache and os.path.exists(cachedir):
         shutil.rmtree(cachedir)
     if not os.path.exists(cachedir): os.mkdir(cachedir)
     
@@ -119,7 +121,7 @@ if __name__ == '__main__':
             ('Ovarian Serous Adenocarcinoma', ()),
             ('Pancreatic Ductal Adenocarcinoma', ()),
             ('Paraganglioma', ('Pheochromocytoma',)), #'Paraganglioma & Pheochromocytoma'
-            ('Prostate Adenocarcinoma	', ()),
+            ('Prostate Adenocarcinoma', ()),
             ('Sarcoma', ()),
             ('Skin Cutaneous Melanoma', ()),
             ('Testicular Germ Cell Cancer', ()),
@@ -130,7 +132,8 @@ if __name__ == '__main__':
             ('Uveal Melanoma', ()),
         )) if not settings.test else OrderedDict((
             ('Acute Myeloid Leukemia', ()),
-            ('Adrenocortical Carcinoma', ())
+            ('Breast Ductal Carcinoma', ()),
+            ('Breast Lobular Carcinoma', ())
         ))
         pickle.dump(
             cancertypes,
@@ -143,7 +146,7 @@ if __name__ == '__main__':
     # Load corpora
     if mainprocess:
         logging.info('Loading pubmed collection')
-        pmc = PubmedCollection('pubmed','~/pubmed')
+        pmc = PubmedCollection(location='~/pubmed')
         corpora = {
             ct: PubmedQueryResult(
                 results=pmc.query_document_index(ct),corpus=pmc,
@@ -153,7 +156,16 @@ if __name__ == '__main__':
         corpora_shelve = shelve.open(os.path.join(cachedir, 'corpora.shlv'))
         for ct in corpora: corpora_shelve[ct] = corpora[ct]
         corpora_shelve.close()
-    else: corpora = shelve.open(os.path.join(cachedir, 'corpora.shlv'))
+        corpora_sizes = pd.DataFrame(
+            {
+            'trainlen': [len(corpora[ct].results) for ct in cancertypes],
+            'testlen': [len(corpora[ct].results_test) for ct in cancertypes]
+            }, index=cancertypes
+        )
+        corpora_sizes.to_csv(os.path.join(saveloc,'corpora_sizes.csv'))
+    else:
+        corpora = shelve.open(os.path.join(cachedir, 'corpora.shlv'))
+        corpora_sizes = pd.read_csv(os.path.join(saveloc,'corpora_sizes.csv'))
     
     # Generic embeddings
     ## Create PubmedQueryResult that merges all specific PubmedQueryResults
@@ -229,6 +241,68 @@ if __name__ == '__main__':
                     ext_embeddings=[allcancers.embedding, glovemdl]),
                 corpora.items()
             ))
+    elif settings.parallel and settings.parallel_mode == 'slurm':
+        # Start slurm array job and second dependent job to summarize
+        from plumbum import local
+        sarrayjobid = local['sbatch'](
+            '--nodes', 1,
+            '--cpus-per-task', 4, # proc/node
+            '--mem', '6G',
+            '--time', '24:00:00',
+            '--array=0-{}'.format(len(cancertypes)-1),
+            os.sys.executable, # python version used for this run
+            '-m', 'sina.paperwork.pancancer',
+            '--parallel-mode', 'slurm_array_job'
+            #TODO pass other settings
+        )
+        sarrayjobid = sarrayjobid.strip().split()[-1]
+        # sbatch dependent
+        ssumid = local['sbatch'](
+            '--depend=afterok:{}'.format(sarrayjobid),
+            # slurm resources
+            '--nodes', 1,
+            '--cpus-per-task', 1, # proc/node
+            '--mem', '6G',
+            '--time', '24:00:00',
+            os.sys.executable, # python version used for this run
+            '-m', 'sina.paperwork.pancancer',
+            '--parallel-mode', 'slurm_summary'
+            #TODO pass other settings
+        )        
+        exit(0)
+    elif settings.parallel_mode == 'slurm_array_job':
+        # Process one task and exit
+        sarraytaskid = int(os.environ.get('SLURM_ARRAY_TASK_ID'))
+        ct = list(cancertypes)[sarraytaskid]
+        corpus_workflow(
+            corpus=(ct,corpora[ct]),settings=settings,
+            ext_embeddings=[allcancers.embedding, glovemdl]
+        )
+        if settings.downsample_evolution:
+            for downsamplesize in corpora_sizes.trainlen[
+                    corpora_sizes.trainlen < corpora_sizes.loc[ct].trainlen
+                    ].drop_duplicates():
+                # load unprocessed corpus
+                smallercorpus = corpora_shelve[ct]
+                smallercorpus.results = smallercorpus.results.sample(
+                    n = downsamplesize
+                )
+                corpus_workflow(
+                    corpus=('{}_{}'.format(ct, downsamplesize),smallercorpus),
+                    settings=settings, ext_embeddings=[allcancers.embedding, glovemdl]
+                    # allcancers.embedding does now contain some of the dropped training
+                    # so should have a higher bias for success
+                )
+                
+        exit(0)
+    elif settings.parallel_mode == 'slurm_summary':
+        #TODO
+        # after all cancers were process independently
+        # get current process back to be able to summarize all results
+        # so state afer this clause should equal state when everything were run with 1 process
+        # sbatch --depend=afterok:123 my.job
+        print('Summarizing slurm job not yet implemented!')
+        exit(0)
     else: #execute everythin with one CPU
         for ct in cancertypes:
             corpus_workflow(
@@ -246,24 +320,22 @@ if __name__ == '__main__':
         plt.imshow(docoverlap, cmap='viridis')
         plt.colorbar()
         savefig(fig,'corpora_overlap')
-        
-        customs = []
-        generics = []
-        gloves = []
-        for ct in cancertypes:
-            corpus = corpora[ct]
-            print(
-                ct,
-                len(corpus.results),
-                'generic embedding' if corpus.nn_grid_result.best_params_['embedding'] is allcancers.embedding 
-                else ('glove embedding' if corpus.nn_grid_result.best_params_['embedding'] is glovemdl else 'custom embedding')
-            )
-            if corpus.nn_grid_result.best_params_['embedding'] is allcancers.embedding:
-                generics.append(ct)
-            elif corpus.nn_grid_result.best_params_['embedding'] is glovemdl:
-                gloves.append(ct)
-            else:
-                customs.append(ct)
+
+        best_params = pd.DataFrame([corpora[ct].nn_grid_result.best_params_ for ct in cancertypes],
+                                   index=list(cancertypes))
+        best_params.embedding = best_params.embedding.apply(
+            lambda x: 'cancer-generic' if x is allcancers.embedding
+            else ('glove' if x is glovemdl else 'custom')
+        )
+        del best_params['return_model'], best_params['model']
+        best_params['corpus_size'] = [len(corpora[ct].results) for ct in cancertypes]
+        best_params['nn_score'] = [corpora[ct].nn_grid_result.best_score_ for ct in cancertypes]
+        embedding_preference_groups = best_params.groupby('embedding').groups
+        customs = embedding_preference_groups['custom']
+        generics = embedding_preference_groups['cancer-generic']
+        gloves = embedding_preference_groups['glove']
+        best_params.to_csv(os.path.join(saveloc,'best_params.csv'))
+        print(best_params)
         
         # Corpus size category
         fig, ax = plt.subplots()
@@ -295,6 +367,7 @@ if __name__ == '__main__':
         ax.scatter(glscores,[len(corpora[ct].results) for ct in gloves],label='glove')
         ax.set_xlabel('NN score')
         ax.set_ylabel('Corpus size (#)')
+        ax.legend()
         savefig(fig,'score_vs_corpus_size')
         
         # Maximum overlap with other corpus
@@ -324,16 +397,19 @@ if __name__ == '__main__':
         #Maximum overlap with other corpus (%) - marker sized corpus
         from scipy.interpolate import interp1d
         sizemap = interp1d([min([len(corpora[ct].results) for ct in cancertypes]), max([len(corpora[ct].results) for ct in cancertypes])],[20,100])
+        fig, ax = plt.subplots()
         ax.scatter(
             np.where(docoverlap==1, 0, docoverlap).max(axis=1)[[ct in generics for ct in cancertypes]],
             gscores, s=[sizemap(len(corpora[ct].results)) for ct in generics], marker='o', label='generic')
         ax.scatter(
             np.where(docoverlap==1, 0, docoverlap).max(axis=1)[[ct in customs for ct in cancertypes]],
             cscores, s=[sizemap(len(corpora[ct].results)) for ct in customs], marker='^', label='custom')
+        ax.scatter(
+            np.where(docoverlap==1, 0, docoverlap).max(axis=1)[[ct in gloves for ct in cancertypes]],
+            glscores, s=[sizemap(len(corpora[ct].results)) for ct in gloves], marker='*', label='glove')
         ax.legend()
         ax.set_title('Overlap and score')
         ax.set_ylabel('NN score')
         ax.set_xlabel('Maximum overlap with other corpus (%)')
         savefig(fig,'overlap_score')
         
-    

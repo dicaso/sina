@@ -11,6 +11,7 @@ setup(name = 'sina',
       python_requires='>3.6',
       install_requires = [
           'appdirs',
+          'plumbum',
           'kindi',
           'requests',
           'pandas',
@@ -25,7 +26,7 @@ setup(name = 'sina',
           'scispacy',
           'textacy',
           'gensim',
-          'keras', #requires backend installed such as tensorflow
+          'tensorflow',
           'GEOparse' #GEOquery inspired python package
       ],
       extras_require = {
