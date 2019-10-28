@@ -11,6 +11,7 @@ setup(name = 'sina',
       python_requires='>3.6',
       install_requires = [
           'appdirs',
+          'dill',
           'plumbum',
           'kindi',
           'requests',

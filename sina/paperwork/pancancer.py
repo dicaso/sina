@@ -11,7 +11,7 @@ else: # for headless subprocesses in multiprocessing
 from sina.documents import PubmedCollection, PubmedQueryResult
 import sina.config
 from collections import OrderedDict
-import numpy as np, pandas as pd
+import numpy as np, pandas as pd, itertools as it
 import logging, os, time, zipfile, argparse, shutil, shelve
 import gensim
 import matplotlib.pyplot as plt
@@ -38,18 +38,20 @@ if __name__ == '__main__':
     # Argparse
     parser = argparse.ArgumentParser()
     ## general settings
-    parser.add_argument('--test', nargs='?', const=True)
-    parser.add_argument('--clearcache', nargs='?', const=True)
-    parser.add_argument('--debug', nargs='?', const=True, default=False)
-    parser.add_argument('--interactive', nargs='?', const=True, default=False)
-    parser.add_argument('--parallel', type=int) # if ==-1 use one CPU/cancertype
-    parser.add_argument('--parallel-mode', default='multiprocessing') # options multiprocessing, slurm (there are other options but not intended to be started by a user)
+    general = parser.add_argument_group('general settings')
+    general.add_argument('--test', nargs='?', const=True)
+    general.add_argument('--clearcache', nargs='?', const=True)
+    general.add_argument('--debug', nargs='?', const=True, default=False)
+    general.add_argument('--interactive', nargs='?', const=True, default=False)
+    general.add_argument('--parallel', type=int) # if ==-1 use one CPU/cancertype
+    general.add_argument('--parallel-mode', default='multiprocessing') # options multiprocessing, slurm (there are other options but not intended to be started by a user)
     ## ML/NN settings
-    parser.add_argument('--w2vecsize', default = 100, type=int)
-    parser.add_argument('--k_clusters', default = 100, type=int)
-    parser.add_argument('--topmesh', default = 10, type=int)
-    parser.add_argument('--downsample-evolution', nargs='?', const=True, default=False)
-    parser.add_argument('--outputdir')
+    algos = parser.add_argument_group('algorithm settings')
+    algos.add_argument('--w2vecsize', default = 100, type=int)
+    algos.add_argument('--k_clusters', default = 100, type=int)
+    algos.add_argument('--topmesh', default = 10, type=int)
+    algos.add_argument('--downsample-evolution', nargs='?', const=True, default=False)
+    algos.add_argument('--outputdir')
     settings = parser.parse_args()
 
     # Set mainprocess to True if not a child process
@@ -65,6 +67,7 @@ if __name__ == '__main__':
         'topicmining',
         time.strftime("%Y%m%d-%H%M%S")
     )
+    settings.outputdir = saveloc
     if '.local' in saveloc:
         print('Results will be saved in', saveloc)
         print('To save in other dir relative to `.local` set env var `XDG_DATA_HOME`')
@@ -81,6 +84,14 @@ if __name__ == '__main__':
         shutil.rmtree(cachedir)
     if not os.path.exists(cachedir): os.mkdir(cachedir)
     
+    # algorithm settings to pass to distributed jobs
+    algorithm_settings = list(it.chain(*[
+        (a.option_strings[0],) if a.nargs == '?' else
+        (a.option_strings[0],settings.__getattribute__(a.dest))
+        for a in algos._group_actions
+        if not a.const or (a.const == settings.__getattribute__(a.dest))
+    ]))
+
     # Logging
     logging.basicConfig(
         level=logging.DEBUG if settings.debug else logging.INFO,
@@ -252,8 +263,8 @@ if __name__ == '__main__':
             '--array=0-{}'.format(len(cancertypes)-1),
             os.sys.executable, # python version used for this run
             '-m', 'sina.paperwork.pancancer',
-            '--parallel-mode', 'slurm_array_job'
-            #TODO pass other settings
+            '--parallel-mode', 'slurm_array_job',
+            *algorithm_settings
         )
         sarrayjobid = sarrayjobid.strip().split()[-1]
         # sbatch dependent
@@ -266,8 +277,8 @@ if __name__ == '__main__':
             '--time', '24:00:00',
             os.sys.executable, # python version used for this run
             '-m', 'sina.paperwork.pancancer',
-            '--parallel-mode', 'slurm_summary'
-            #TODO pass other settings
+            '--parallel-mode', 'slurm_summary',
+            *algorithm_settings
         )        
         exit(0)
     elif settings.parallel_mode == 'slurm_array_job':
