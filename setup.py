@@ -10,9 +10,9 @@ setup(name = 'sina',
       packages = find_packages(),
       python_requires='>3.6',
       install_requires = [
-          'appdirs',
-          'dill',
-          'plumbum',
+          'appdirs', # cache/data dirs for app
+          'dill',    # improved pickle
+          'plumbum', # subcommands
           'kindi',
           'requests',
           'pandas',

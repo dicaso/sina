@@ -1,4 +1,8 @@
 # For pan-cancer research paper on importance of custom word embeddings
+# ibex command that generated results:
+# sbatch --nodes 1 --cpus-per-task 4 --mem 16G --time 24:00:00 --wrap \
+#  'python3 -m sina.paperwork.pancancer --parallel-mode slurm --downsample-evolution'
+
 ## Imports
 ## matplotlib import that needs to run before all else
 import matplotlib
@@ -31,9 +35,22 @@ def corpus_workflow(corpus,settings,ext_embeddings):
     print(corpus.meshtop,corpus.meshtop_nn,sep='\n')
     corpus.nn_grid_search(ext_embeddings, n_jobs=1)
     logging.info('best result %s', corpus.nn_grid_result.best_params_)
+    # Pickling grid results
+    pickle.dump(
+        corpus.nn_grid_result.cv_results_,
+        open(os.path.join(
+            corpus.saveloc, cancertype.replace(' ','')+'_grid_results.pckl'
+        ),'wb')
+    )
     # embedding by adding an external vector
     return (cancertype, corpus)
 
+def logmemory():
+    import resource
+    logging.info(
+        'Using max {:.0f}MB'.format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
+    )
+    
 if __name__ == '__main__':
     # Argparse
     parser = argparse.ArgumentParser()
@@ -87,7 +104,7 @@ if __name__ == '__main__':
     # algorithm settings to pass to distributed jobs
     algorithm_settings = list(it.chain(*[
         (a.option_strings[0],) if a.nargs == '?' else
-        (a.option_strings[0],settings.__getattribute__(a.dest))
+        (a.option_strings[0],str(settings.__getattribute__(a.dest)))
         for a in algos._group_actions
         if not a.const or (a.const == settings.__getattribute__(a.dest))
     ]))
@@ -102,7 +119,9 @@ if __name__ == '__main__':
         ],
         format='%(levelname)s @ %(name)s [%(asctime)s] %(message)s'
     )
-    if mainprocess: logging.info('Settings: %s', settings)
+    if mainprocess:
+        logging.info('Settings: %s', settings)
+        logmemory()
         
     ## cancertypes
     ## https://www.cancer.gov/about-nci/organization/ccg/research/structural-genomics/tcga/studied-cancers
@@ -174,6 +193,7 @@ if __name__ == '__main__':
             }, index=cancertypes
         )
         corpora_sizes.to_csv(os.path.join(saveloc,'corpora_sizes.csv'))
+        logmemory()
     else:
         corpora = shelve.open(os.path.join(cachedir, 'corpora.shlv'))
         corpora_sizes = pd.read_csv(os.path.join(saveloc,'corpora_sizes.csv'))
@@ -216,6 +236,7 @@ if __name__ == '__main__':
             open(os.path.join(cachedir,'allcancers.pckl'),'wb')
         )
         logging.info('combined cancers embedding %s', allcancers.embedding)
+        logmemory()
     else:
         allcancers = pickle.load(open(os.path.join(cachedir,'allcancers.pckl'),'rb'))
     
@@ -237,6 +258,7 @@ if __name__ == '__main__':
         glove2word2vec.glove2word2vec(glovepth[:-3]+'100d.txt',glovepth[:-3]+'100d.w2v.txt')
     glovemdl = gensim.models.KeyedVectors.load_word2vec_format(glovepth[:-3]+'100d.w2v.txt')
     logging.info('glove embedding %s', glovemdl)
+    logmemory()
     
     # Multiprocessing logic
     if mainprocess and settings.parallel and settings.parallel_mode == 'multiprocessing':
@@ -258,13 +280,16 @@ if __name__ == '__main__':
         sarrayjobid = local['sbatch'](
             '--nodes', 1,
             '--cpus-per-task', 4, # proc/node
-            '--mem', '6G',
+            '--mem', '16G',
             '--time', '24:00:00',
             '--array=0-{}'.format(len(cancertypes)-1),
-            os.sys.executable, # python version used for this run
-            '-m', 'sina.paperwork.pancancer',
-            '--parallel-mode', 'slurm_array_job',
-            *algorithm_settings
+            '--wrap',
+            ' '.join(
+                [os.sys.executable, # python version used for this run
+                '-m', 'sina.paperwork.pancancer',
+                '--parallel-mode', 'slurm_array_job',
+                ]+algorithm_settings
+            ) #wrap expects 1 str with full command
         )
         sarrayjobid = sarrayjobid.strip().split()[-1]
         # sbatch dependent
@@ -273,12 +298,15 @@ if __name__ == '__main__':
             # slurm resources
             '--nodes', 1,
             '--cpus-per-task', 1, # proc/node
-            '--mem', '6G',
+            '--mem', '8G',
             '--time', '24:00:00',
-            os.sys.executable, # python version used for this run
-            '-m', 'sina.paperwork.pancancer',
-            '--parallel-mode', 'slurm_summary',
-            *algorithm_settings
+            '--wrap',
+            ' '.join(
+                [os.sys.executable, # python version used for this run
+                '-m', 'sina.paperwork.pancancer',
+                '--parallel-mode', 'slurm_summary',
+                ]+algorithm_settings
+            )
         )        
         exit(0)
     elif settings.parallel_mode == 'slurm_array_job':
