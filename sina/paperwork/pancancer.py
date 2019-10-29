@@ -316,6 +316,13 @@ if __name__ == '__main__':
             corpus=(ct,corpora[ct]),settings=settings,
             ext_embeddings=[allcancers.embedding, glovemdl]
         )
+        # Dump corpus pickle for reloading in summary phase
+        # this introduces an extra copy next to shelve
+        #TODO clean at end of summary
+        pickle.dump(
+            corpora[ct],
+            open(os.path.join(corpora[ct].saveloc, 'processed_corpus.pckl'), 'wb')
+        )
         if settings.downsample_evolution:
             for downsamplesize in corpora_sizes.trainlen[
                     corpora_sizes.trainlen < corpora_sizes.loc[ct].trainlen
@@ -339,8 +346,17 @@ if __name__ == '__main__':
         # get current process back to be able to summarize all results
         # so state afer this clause should equal state when everything were run with 1 process
         # sbatch --depend=afterok:123 my.job
-        print('Summarizing slurm job not yet implemented!')
-        exit(0)
+        logging.info('Loading processed corpora from slurm distributed tasks.')
+        corpora = {
+            ct: pickle.load(
+                open(
+                    os.path.join(
+                        saveloc,ct.replace(' ',''),'processed_corpus.pckl'),
+                        'rb'
+                    )
+                )
+            for ct in cancertypes
+        }
     else: #execute everythin with one CPU
         for ct in cancertypes:
             corpus_workflow(
