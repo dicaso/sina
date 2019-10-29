@@ -1023,7 +1023,7 @@ class PubmedQueryResult(object):
         """
         from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
         from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
-        import numpy as np
+        import numpy as np, pandas as pd
         
         print('Grid search for embeddings/hyperparameters')
         # Parameter grid for grid search
@@ -1051,27 +1051,43 @@ class PubmedQueryResult(object):
             cv=4, verbose=1, n_jobs=n_jobs
         )
 
-        self.nn_grid_result = grid.fit(self.X, self.Y)
+        # Not attaching raw nn_grid_result to self
+        # as it generates unpickable _thread._local objects
+        nn_grid_result = grid.fit(self.X, self.Y)
+        self.nn_best_params = nn_grid_result.best_params_
+        self.nn_best_score = nn_grid_result.best_score_
         test_accuracy = grid.score(self.X_test, self.Y_test)
         print(
             'Best Accuracy : {:.4f}\n{}\nTest Accuracy : {:.4f}\n\n'.format(
-                self.nn_grid_result.best_score_,
-                self.nn_grid_result.best_params_,
+                self.nn_best_score,
+                self.nn_best_params,
                 test_accuracy
             )
         )
 
+        # Reformat grid results
+        self.nn_grid_result = pd.DataFrame(nn_grid_result.cv_results_)
+        del self.nn_grid_result['params']
+        self.nn_grid_result['vocab_size'] = self.nn_grid_result.param_embedding.apply(
+            lambda x: len(
+                x.vocab if hasattr(x,'vocab') else x.wv.vocab
+            )
+        )
+        self.nn_grid_result['param_embedding'] = self.nn_grid_result['param_embedding'].apply(
+            lambda x: param_grid['embedding'].index(x)
+        )
+        
         # Calculate std deviation on grid results that have same
         # settings except for embedding
         self.nn_grid_embedding_std =  np.std(
-            self.nn_grid_result.cv_results_['mean_test_score'][
+            nn_grid_result.cv_results_['mean_test_score'][
                 # Selector best settings except for embedding
-                (self.nn_grid_result.cv_results_['param_embedding_trainable'] ==
-                     self.nn_grid_result.best_params_['embedding_trainable']) &
-                (self.nn_grid_result.cv_results_['param_kernel_size'] ==
-                     self.nn_grid_result.best_params_['kernel_size']) &
-                (self.nn_grid_result.cv_results_['param_num_filters'] ==
-                     self.nn_grid_result.best_params_['num_filters'])
+                (nn_grid_result.cv_results_['param_embedding_trainable'] ==
+                     nn_grid_result.best_params_['embedding_trainable']) &
+                (nn_grid_result.cv_results_['param_kernel_size'] ==
+                     nn_grid_result.best_params_['kernel_size']) &
+                (nn_grid_result.cv_results_['param_num_filters'] ==
+                     nn_grid_result.best_params_['num_filters'])
                 ]
             )
         

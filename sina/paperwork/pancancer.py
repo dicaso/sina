@@ -34,13 +34,12 @@ def corpus_workflow(corpus,settings,ext_embeddings):
     corpus.nn_keras_predictor(model='cnn',embedding_trainable=False)
     print(corpus.meshtop,corpus.meshtop_nn,sep='\n')
     corpus.nn_grid_search(ext_embeddings, n_jobs=1)
-    logging.info('best result %s', corpus.nn_grid_result.best_params_)
-    # Pickling grid results
-    pickle.dump(
-        corpus.nn_grid_result.cv_results_,
-        open(os.path.join(
-            corpus.saveloc, cancertype.replace(' ','')+'_grid_results.pckl'
-        ),'wb')
+    logging.info('best result %s', corpus.nn_best_params)
+    # Saving grid results
+    corpus.nn_grid_result.to_csv(
+        os.path.join(
+            corpus.saveloc, cancertype.replace(' ','')+'_grid_results.csv'
+        )
     )
     # embedding by adding an external vector
     return (cancertype, corpus)
@@ -360,7 +359,7 @@ if __name__ == '__main__':
         plt.colorbar()
         savefig(fig,'corpora_overlap')
 
-        best_params = pd.DataFrame([corpora[ct].nn_grid_result.best_params_ for ct in cancertypes],
+        best_params = pd.DataFrame([corpora[ct].nn_best_params for ct in cancertypes],
                                    index=list(cancertypes))
         best_params.embedding = best_params.embedding.apply(
             lambda x: 'cancer-generic' if x is allcancers.embedding
@@ -368,11 +367,11 @@ if __name__ == '__main__':
         )
         del best_params['return_model'], best_params['model']
         best_params['corpus_size'] = [len(corpora[ct].results) for ct in cancertypes]
-        best_params['nn_score'] = [corpora[ct].nn_grid_result.best_score_ for ct in cancertypes]
+        best_params['nn_score'] = [corpora[ct].nn_best_score for ct in cancertypes]
         embedding_preference_groups = best_params.groupby('embedding').groups
-        customs = embedding_preference_groups['custom']
-        generics = embedding_preference_groups['cancer-generic']
-        gloves = embedding_preference_groups['glove']
+        customs = embedding_preference_groups['custom'] if 'custom' in embedding_preference_groups else []
+        generics = embedding_preference_groups['cancer-generic'] if 'cancer-generic' in embedding_preference_groups else []
+        gloves = embedding_preference_groups['glove'] if 'glove' in embedding_preference_groups else []
         best_params.to_csv(os.path.join(saveloc,'best_params.csv'))
         print(best_params)
         
@@ -388,9 +387,9 @@ if __name__ == '__main__':
         ## optional look at embedding_trainable
         
         from scipy import stats
-        cscores = [corpora[ct].nn_grid_result.best_score_ for ct in customs]
-        gscores = [corpora[ct].nn_grid_result.best_score_ for ct in generics]
-        glscores = [corpora[ct].nn_grid_result.best_score_ for ct in gloves]
+        cscores = [corpora[ct].nn_best_score for ct in customs]
+        gscores = [corpora[ct].nn_best_score for ct in generics]
+        glscores = [corpora[ct].nn_best_score for ct in gloves]
         logging.info(
             'generic mean+var %s (%s)\ncustom mean+var %s (%s)\nglove mean+var %s (%s)\nttest %s',
             np.mean(gscores), np.var(gscores),
