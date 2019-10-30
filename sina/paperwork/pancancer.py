@@ -173,9 +173,9 @@ if __name__ == '__main__':
         cancertypes = pickle.load(open(os.path.join(cachedir,'cancertypes.pckl'),'rb'))
         
     # Load corpora
+    pmc = PubmedCollection(location='~/pubmed')
     if mainprocess and not os.path.exists(os.path.join(saveloc, 'corpora.shlv')):
         logging.info('Loading pubmed collection')
-        pmc = PubmedCollection(location='~/pubmed')
         corpora = {
             ct: PubmedQueryResult(
                 results=pmc.query_document_index(ct),corpus=pmc,
