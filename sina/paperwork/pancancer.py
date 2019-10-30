@@ -1,6 +1,6 @@
 # For pan-cancer research paper on importance of custom word embeddings
 # ibex command that generated results:
-# sbatch --nodes 1 --cpus-per-task 4 --mem 16G --time 24:00:00 --wrap \
+# sbatch --nodes 1 --cpus-per-task 4 --mem 32G --time 24:00:00 --wrap \
 #  'python3 -m sina.paperwork.pancancer --parallel-mode slurm --downsample-evolution'
 
 ## Imports
@@ -173,7 +173,7 @@ if __name__ == '__main__':
         cancertypes = pickle.load(open(os.path.join(cachedir,'cancertypes.pckl'),'rb'))
         
     # Load corpora
-    if mainprocess:
+    if mainprocess and not os.path.exists(os.path.join(saveloc, 'corpora.shlv')):
         logging.info('Loading pubmed collection')
         pmc = PubmedCollection(location='~/pubmed')
         corpora = {
@@ -182,7 +182,7 @@ if __name__ == '__main__':
                 saveloc = os.path.join(saveloc, ct.replace(' ',''))
             ) for ct in cancertypes
         }
-        corpora_shelve = shelve.open(os.path.join(cachedir, 'corpora.shlv'))
+        corpora_shelve = shelve.open(os.path.join(saveloc, 'corpora.shlv'))
         for ct in corpora: corpora_shelve[ct] = corpora[ct]
         corpora_shelve.close()
         corpora_sizes = pd.DataFrame(
@@ -194,8 +194,14 @@ if __name__ == '__main__':
         corpora_sizes.to_csv(os.path.join(saveloc,'corpora_sizes.csv'))
         logmemory()
     else:
-        corpora = shelve.open(os.path.join(cachedir, 'corpora.shlv'))
+        corpora = shelve.open(os.path.join(saveloc, 'corpora.shlv'))
         corpora_sizes = pd.read_csv(os.path.join(saveloc,'corpora_sizes.csv'))
+        if mainprocess:
+            # load back in memory
+            logging.info('Reloading corpora in main process')
+            logmemory()
+            corpora = {ct:corpora[ct] for ct in corpora}
+            logmemory()
     
     # Generic embeddings
     ## Create PubmedQueryResult that merges all specific PubmedQueryResults
@@ -207,7 +213,8 @@ if __name__ == '__main__':
         ).reset_index()
         allcancers_training.drop_duplicates('pmid', inplace=True)
         allcancers_testing = pd.concat(
-            [corpora[ct].results_test for ct in cancertypes]
+            [corpora[ct].results_test for ct in cancertypes],
+            sort=False
         ).reset_index()
         allcancers_testing.drop_duplicates('pmid', inplace=True)
         # Remove allcancers_testing papers that are in training
