@@ -370,6 +370,23 @@ if __name__ == '__main__':
                 corpus=(ct,corpora[ct]),settings=settings,
                 ext_embeddings=[allcancers.embedding, glovemdl]
             )
+                    if settings.downsample_evolution:
+            if settings.downsample_evolution:
+                # TODO integrate in one function call together for slurm and single cpu processing
+                for downsamplesize in corpora_sizes.trainlen[
+                        corpora_sizes.trainlen < corpora_sizes.loc[ct].trainlen
+                        ].drop_duplicates():
+                    # load unprocessed corpus
+                    smallercorpus = corpora_shelve[ct]
+                    smallercorpus.results = smallercorpus.results.sample(
+                        n = downsamplesize
+                    )
+                    corpus_workflow(
+                        corpus=('{}_{}'.format(ct, downsamplesize),smallercorpus),
+                        settings=settings, ext_embeddings=[allcancers.embedding, glovemdl]
+                        # allcancers.embedding does now contain some of the dropped training
+                        # so should have a higher bias for success
+                    )
 
     if mainprocess:
         docoverlap = np.zeros((len(cancertypes),len(cancertypes)))
