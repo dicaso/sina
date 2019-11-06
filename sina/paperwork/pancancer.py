@@ -370,7 +370,6 @@ if __name__ == '__main__':
                 corpus=(ct,corpora[ct]),settings=settings,
                 ext_embeddings=[allcancers.embedding, glovemdl]
             )
-                    if settings.downsample_evolution:
             if settings.downsample_evolution:
                 # TODO integrate in one function call together for slurm and single cpu processing
                 for downsamplesize in corpora_sizes.trainlen[
