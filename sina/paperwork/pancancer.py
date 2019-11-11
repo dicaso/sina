@@ -288,7 +288,7 @@ if __name__ == '__main__':
             '--nodes', 1,
             '--cpus-per-task', 4, # proc/node #TODO change to settings.parallel
             '--mem', '16G',
-            '--time', '24:00:00',
+            '--time', '60:00:00',
             '--array=0-{}'.format(len(cancertypes)-1),
             '--wrap',
             ' '.join(
