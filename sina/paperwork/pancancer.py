@@ -184,7 +184,8 @@ if __name__ == '__main__':
         }
         corpora_shelve = shelve.open(os.path.join(saveloc, 'corpora.shlv'))
         for ct in corpora: corpora_shelve[ct] = corpora[ct]
-        corpora_shelve.close()
+        if not settings.downsample_evolution:
+            corpora_shelve.close()
         corpora_sizes = pd.DataFrame(
             {
             'trainlen': [len(corpora[ct].results) for ct in cancertypes],
