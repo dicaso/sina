@@ -192,7 +192,7 @@ if __name__ == '__main__':
             'testlen': [len(corpora[ct].results_test) for ct in cancertypes]
             }, index=cancertypes
         )
-        corpora_sizes.to_csv(os.path.join(saveloc,'corpora_sizes.csv'))
+        corpora_sizes.to_csv(os.path.join(saveloc,'corpora_sizes.csv'), index_col=0)
         logmemory()
     else:
         corpora = shelve.open(os.path.join(saveloc, 'corpora.shlv'))
