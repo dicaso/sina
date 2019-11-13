@@ -22,28 +22,34 @@ import matplotlib.pyplot as plt
 import dill as pickle
 
 def corpus_workflow(corpus,settings,ext_embeddings):
-    cancertype, corpus = corpus
-    logging.info(cancertype)
-    corpus.transform_text(preprocess=True,method='tfid')
-    corpus.analyze_mesh(topfreqs=settings.topmesh)
-    corpus.gensim_w2v(vecsize=settings.w2vecsize)
-    #corpus.k_means_embedding(k=settings.k_clusters)
-    corpus.predict_meshterms(model='svm', kmeans_only_freqs=False, rebalance='oversample')
-    # Transform X for embedded processing
-    corpus.transform_text(method='idx')
-    corpus.nn_keras_predictor(model='cnn',embedding_trainable=False)
-    print(corpus.meshtop,corpus.meshtop_nn,sep='\n')
-    corpus.nn_grid_search(ext_embeddings, n_jobs=1)
-    logging.info('best result %s', corpus.nn_best_params)
-    # Saving grid results
-    corpus.nn_grid_result.to_csv(
-        os.path.join(
-            corpus.saveloc, cancertype.replace(' ','')+'_grid_results.csv'
+    try:
+        cancertype, corpus = corpus
+        logging.info(cancertype)
+        corpus.transform_text(preprocess=True,method='tfid')
+        corpus.analyze_mesh(topfreqs=settings.topmesh)
+        corpus.gensim_w2v(vecsize=settings.w2vecsize)
+        #corpus.k_means_embedding(k=settings.k_clusters)
+        corpus.predict_meshterms(model='svm', kmeans_only_freqs=False, rebalance='oversample')
+        # Transform X for embedded processing
+        corpus.transform_text(method='idx')
+        corpus.nn_keras_predictor(model='cnn',embedding_trainable=False)
+        print(corpus.meshtop,corpus.meshtop_nn,sep='\n')
+        corpus.nn_grid_search(ext_embeddings, n_jobs=1)
+        logging.info('best result %s', corpus.nn_best_params)
+        # Saving grid results
+        corpus.nn_grid_result.to_csv(
+            os.path.join(
+                corpus.saveloc, cancertype.replace(' ','')+'_grid_results.csv'
+            )
         )
-    )
-    # embedding by adding an external vector
-    return (cancertype, corpus)
-
+        # embedding by adding an external vector
+        return (cancertype, corpus)
+    except ValueError:
+        logging.warn(
+            'Corpus size too small for consistent predictions (%s)',
+            len(corpus.results)
+        )
+        
 def logmemory():
     import resource
     logging.info(
