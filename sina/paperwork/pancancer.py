@@ -190,8 +190,9 @@ if __name__ == '__main__':
         }
         corpora_shelve = shelve.open(os.path.join(saveloc, 'corpora.shlv'))
         for ct in corpora: corpora_shelve[ct] = corpora[ct]
-        if not settings.downsample_evolution:
-            corpora_shelve.close()
+        corpora_shelve.close()
+        if settings.downsample_evolution: # make available readonly shelve
+            corpora_shelve = shelve.open(os.path.join(saveloc, 'corpora.shlv'), flag='r')
         corpora_sizes = pd.DataFrame(
             {
             'trainlen': [len(corpora[ct].results) for ct in cancertypes],
@@ -201,7 +202,7 @@ if __name__ == '__main__':
         corpora_sizes.to_csv(os.path.join(saveloc,'corpora_sizes.csv'))
         logmemory()
     else:
-        corpora = shelve.open(os.path.join(saveloc, 'corpora.shlv'))
+        corpora = shelve.open(os.path.join(saveloc, 'corpora.shlv'), flag='r')
         corpora_sizes = pd.read_csv(
             os.path.join(saveloc,'corpora_sizes.csv'),
             index_col=0
