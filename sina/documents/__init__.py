@@ -663,7 +663,9 @@ class PubmedQueryResult(object):
         shards = sorted(glob.glob(os.path.join(self.corpus.location,'.index/*')))
         lenshards = len(shards)
         pmiddbs = [
-            shelve.open(os.path.join(self.corpus.location,'.index',str(i),'pmid.shelve')) for i in range(lenshards)
+            shelve.open(
+                os.path.join(self.corpus.location,'.index',str(i),'pmid.shelve')
+                flag='r') for i in range(lenshards)
         ]
         self.meshterms = [pmiddbs[int(pmid)%lenshards][pmid][4] for pmid in self.results.index]
         if self.testset:
