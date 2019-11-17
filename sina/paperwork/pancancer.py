@@ -49,7 +49,7 @@ def corpus_workflow(corpus, settings, ext_embeddings):
         # Saving grid results
         corpus.nn_grid_result.to_csv(
             os.path.join(
-                corpus.saveloc, cancertype.replace(' ', '')+'_grid_results.csv'
+                corpus.saveloc, cancertype.replace(' ', '') + '_grid_results.csv'
             )
         )
         # embedding by adding an external vector
@@ -65,7 +65,7 @@ def logmemory():
     import resource
     logging.info(
         'Using max {:.0f}MB'.format(resource.getrusage(
-            resource.RUSAGE_SELF).ru_maxrss/1024)
+            resource.RUSAGE_SELF).ru_maxrss / 1024)
     )
 
 
@@ -114,8 +114,8 @@ if __name__ == '__main__':
         print('created dir', saveloc)
 
     def savefig(fig, filename):
-        fig.savefig(os.path.join(saveloc, filename+'.png'))
-        fig.savefig(os.path.join(saveloc, filename+'.pdf'))
+        fig.savefig(os.path.join(saveloc, filename + '.png'))
+        fig.savefig(os.path.join(saveloc, filename + '.pdf'))
 
     # Prepare cache dir
     cachedir = sina.config.appdirs.user_cache_dir
@@ -287,7 +287,7 @@ if __name__ == '__main__':
         sina.config.appdirs.user_data_dir,
         'glove.6B.zip'
     )
-    if not os.path.exists(glovepth[:-3]+'100d.w2v.txt'):
+    if not os.path.exists(glovepth[:-3] + '100d.w2v.txt'):
         import urllib.request
         gloveurl = "http://nlp.stanford.edu/data/glove.6B.zip"
         urllib.request.urlretrieve(gloveurl, glovepth)
@@ -296,9 +296,9 @@ if __name__ == '__main__':
             zglove.extract('glove.6B.100d.txt', os.path.dirname(glovepth))
         from gensim.scripts import glove2word2vec
         glove2word2vec.glove2word2vec(
-            glovepth[:-3]+'100d.txt', glovepth[:-3]+'100d.w2v.txt')
+            glovepth[:-3] + '100d.txt', glovepth[:-3] + '100d.w2v.txt')
     glovemdl = gensim.models.KeyedVectors.load_word2vec_format(
-        glovepth[:-3]+'100d.w2v.txt')
+        glovepth[:-3] + '100d.w2v.txt')
     logging.info('glove embedding %s', glovemdl)
     logmemory()
 
@@ -308,8 +308,7 @@ if __name__ == '__main__':
         from functools import partial
         logging.info('starting pool of %s workers', settings.parallel)
         with mp.Pool(
-                len(cancertypes) if settings.parallel == -
-            1 else settings.parallel
+                len(cancertypes) if settings.parallel == -1 else settings.parallel
         ) as pool:
             corpora = dict(pool.map(
                 partial(
@@ -325,13 +324,13 @@ if __name__ == '__main__':
             '--cpus-per-task', 4,  # proc/node #TODO change to settings.parallel
             '--mem', '16G',
             '--time', '60:00:00',
-            '--array=0-{}'.format(len(cancertypes)-1),
+            '--array=0-{}'.format(len(cancertypes) - 1),
             '--wrap',
             ' '.join(
                 [os.sys.executable,  # python version used for this run
                  '-m', 'sina.paperwork.pancancer',
                  '--parallel-mode', 'slurm_array_job',
-                 ]+algorithm_settings
+                 ] + algorithm_settings
             )  # wrap expects 1 str with full command
         )
         sarrayjobid = sarrayjobid.strip().split()[-1]
@@ -348,7 +347,7 @@ if __name__ == '__main__':
                 [os.sys.executable,  # python version used for this run
                  '-m', 'sina.paperwork.pancancer',
                  '--parallel-mode', 'slurm_summary',
-                 ]+algorithm_settings
+                 ] + algorithm_settings
             )
         )
         exit(0)
@@ -431,11 +430,12 @@ if __name__ == '__main__':
                     )
 
     if mainprocess:
+        logging.info('Summarizing results')
         docoverlap = np.zeros((len(cancertypes), len(cancertypes)))
         for i, cti in enumerate(cancertypes):
             for j, ctj in enumerate(cancertypes):
                 docoverlap[i, j] = len(corpora[cti].results.index.intersection(
-                    corpora[ctj].results.index))/len(corpora[cti].results.index)
+                    corpora[ctj].results.index)) / len(corpora[cti].results.index)
         fig, ax = plt.subplots()
         plt.imshow(docoverlap, cmap='viridis')
         plt.colorbar()
@@ -464,11 +464,11 @@ if __name__ == '__main__':
         # Corpus size category
         fig, ax = plt.subplots()
         ax.scatter([len(corpora[ct].results)
-                    for ct in generics], [0]*len(generics), label='generic')
+                    for ct in generics], [0] * len(generics), label='generic')
         ax.scatter([len(corpora[ct].results)
-                    for ct in customs], [1]*len(customs), label='custom')
+                    for ct in customs], [1] * len(customs), label='custom')
         ax.scatter([len(corpora[ct].results)
-                    for ct in gloves], [2]*len(gloves), label='glove')
+                    for ct in gloves], [2] * len(gloves), label='glove')
         ax.legend()
         ax.set_title('Corpus size and the relevance of a custom embedding')
         ax.set_xlabel('Corpus size (#)')
