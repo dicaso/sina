@@ -10,7 +10,7 @@ if __name__ == '__main__': # in interactive case
     matplotlib.rcParams['figure.max_open_warning'] = 50
 else: # for headless subprocesses in multiprocessing
     matplotlib.use('pdf')
-    
+
 ## general
 from sina.documents import PubmedCollection, PubmedQueryResult
 import sina.config
@@ -49,13 +49,13 @@ def corpus_workflow(corpus,settings,ext_embeddings):
             'Corpus size too small for consistent predictions (%s)',
             len(corpus.results)
         )
-        
+
 def logmemory():
     import resource
     logging.info(
         'Using max {:.0f}MB'.format(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024)
     )
-    
+
 if __name__ == '__main__':
     # Argparse
     parser = argparse.ArgumentParser()
@@ -82,7 +82,7 @@ if __name__ == '__main__':
     # matplotlib interactive
     if mainprocess and not settings.interactive:
         matplotlib.use('pdf')
-    
+
     # Prepare outputdir
     saveloc = settings.outputdir or os.path.join(
         sina.config.appdirs.user_data_dir,
@@ -99,13 +99,13 @@ if __name__ == '__main__':
     def savefig(fig,filename):
         fig.savefig(os.path.join(saveloc,filename+'.png'))
         fig.savefig(os.path.join(saveloc,filename+'.pdf'))
-    
+
     # Prepare cache dir
     cachedir = sina.config.appdirs.user_cache_dir
     if mainprocess and settings.clearcache and os.path.exists(cachedir):
         shutil.rmtree(cachedir)
     if not os.path.exists(cachedir): os.mkdir(cachedir)
-    
+
     # algorithm settings to pass to distributed jobs
     algorithm_settings = list(it.chain(*[
         (a.option_strings[0],) if a.nargs == '?' else
@@ -124,10 +124,9 @@ if __name__ == '__main__':
         ],
         format='%(levelname)s @ %(name)s [%(asctime)s] %(message)s'
     )
-    if mainprocess:
-        logging.info('Settings: %s', settings)
-        logmemory()
-        
+    logging.info('Settings: %s', settings)
+    logmemory()
+
     ## cancertypes
     ## https://www.cancer.gov/about-nci/organization/ccg/research/structural-genomics/tcga/studied-cancers
     if mainprocess:
@@ -177,7 +176,7 @@ if __name__ == '__main__':
     else:
         # Load cancertypes from cache
         cancertypes = pickle.load(open(os.path.join(cachedir,'cancertypes.pckl'),'rb'))
-        
+
     # Load corpora
     pmc = PubmedCollection(location='~/pubmed')
     if mainprocess and not os.path.exists(os.path.join(saveloc, 'corpora.shlv')):
@@ -213,7 +212,7 @@ if __name__ == '__main__':
             logmemory()
             corpora = {ct:corpora[ct] for ct in corpora}
             logmemory()
-    
+
     # Generic embeddings
     ## Create PubmedQueryResult that merges all specific PubmedQueryResults
     if mainprocess:
@@ -256,7 +255,7 @@ if __name__ == '__main__':
         logmemory()
     else:
         allcancers = pickle.load(open(os.path.join(cachedir,'allcancers.pckl'),'rb'))
-    
+
     ## GloVe
     logging.info('preparing glove embedding')
     ### download wiki trained glove
@@ -276,7 +275,7 @@ if __name__ == '__main__':
     glovemdl = gensim.models.KeyedVectors.load_word2vec_format(glovepth[:-3]+'100d.w2v.txt')
     logging.info('glove embedding %s', glovemdl)
     logmemory()
-    
+
     # Multiprocessing logic
     if mainprocess and settings.parallel and settings.parallel_mode == 'multiprocessing':
         import multiprocessing as mp
@@ -324,13 +323,14 @@ if __name__ == '__main__':
                 '--parallel-mode', 'slurm_summary',
                 ]+algorithm_settings
             )
-        )        
+        )
         exit(0)
     elif settings.parallel_mode == 'slurm_array_job':
         # Process one task and exit
         sarraytaskid = int(os.environ.get('SLURM_ARRAY_TASK_ID'))
         ct = list(cancertypes)[sarraytaskid]
-        corpus_workflow(
+        logging.info('Processing array task %s (%s)', sarrayjobid, ct)
+        cancertype, corpus = corpus_workflow(
             corpus=(ct,corpora[ct]),settings=settings,
             ext_embeddings=[allcancers.embedding, glovemdl]
         )
@@ -338,10 +338,11 @@ if __name__ == '__main__':
         # this introduces an extra copy next to shelve
         #TODO clean at end of summary
         pickle.dump(
-            corpora[ct],
-            open(os.path.join(corpora[ct].saveloc, 'processed_corpus.pckl'), 'wb')
+            corpus,
+            open(os.path.join(corpus.saveloc, 'processed_corpus.pckl'), 'wb')
         )
         if settings.downsample_evolution:
+            logging.info('Starting downsample evolution for "%s"', ct)
             for downsamplesize in corpora_sizes.trainlen[
                     corpora_sizes.trainlen < corpora_sizes.loc[ct].trainlen
                     ].drop_duplicates():
@@ -356,7 +357,7 @@ if __name__ == '__main__':
                     # allcancers.embedding does now contain some of the dropped training
                     # so should have a higher bias for success
                 )
-                
+
         exit(0)
     elif settings.parallel_mode == 'slurm_summary':
         #TODO
@@ -424,7 +425,7 @@ if __name__ == '__main__':
         gloves = embedding_preference_groups['glove'] if 'glove' in embedding_preference_groups else []
         best_params.to_csv(os.path.join(saveloc,'best_params.csv'))
         print(best_params)
-        
+
         # Corpus size category
         fig, ax = plt.subplots()
         ax.scatter([len(corpora[ct].results) for ct in generics], [0]*len(generics), label='generic')
@@ -435,7 +436,7 @@ if __name__ == '__main__':
         ax.set_xlabel('Corpus size (#)')
         savefig(fig,'corpus_size')
         ## optional look at embedding_trainable
-        
+
         from scipy import stats
         cscores = [corpora[ct].nn_best_score for ct in customs]
         gscores = [corpora[ct].nn_best_score for ct in generics]
@@ -445,7 +446,7 @@ if __name__ == '__main__':
             np.mean(gscores), np.var(gscores),
             np.mean(cscores), np.var(cscores),
             np.mean(glscores), np.var(glscores),
-            stats.f_oneway(cscores, gscores, glscores) #stats.ttest_ind(cscores, gscores)    
+            stats.f_oneway(cscores, gscores, glscores) #stats.ttest_ind(cscores, gscores)
         )
 
         # Score vs size
@@ -457,7 +458,7 @@ if __name__ == '__main__':
         ax.set_ylabel('Corpus size (#)')
         ax.legend()
         savefig(fig,'score_vs_corpus_size')
-        
+
         # Maximum overlap with other corpus
         fig, ax = plt.subplots()
         ax.scatter(
@@ -471,7 +472,7 @@ if __name__ == '__main__':
         ax.set_xlabel('Corpus size (#)')
         ax.set_ylabel('Maximum overlap with other corpus (%)')
         savefig(fig,'corpus_size_overlap')
-        
+
         #3d
         # from mpl_toolkits.mplot3d import Axes3D
         # fig = plt.figure()
@@ -481,7 +482,7 @@ if __name__ == '__main__':
         # ax.set_xlabel('Corpus size (#)')
         # ax.set_ylabel('Maximum overlap with other corpus (%)')
         # ax.set_zlabel('NN score')
-        
+
         #Maximum overlap with other corpus (%) - marker sized corpus
         from scipy.interpolate import interp1d
         sizemap = interp1d([min([len(corpora[ct].results) for ct in cancertypes]), max([len(corpora[ct].results) for ct in cancertypes])],[20,100])
@@ -500,4 +501,3 @@ if __name__ == '__main__':
         ax.set_ylabel('NN score')
         ax.set_xlabel('Maximum overlap with other corpus (%)')
         savefig(fig,'overlap_score')
-        
