@@ -546,4 +546,4 @@ if __name__ == '__main__':
         ax.set_title('Overlap and score')
         ax.set_ylabel('NN score')
         ax.set_xlabel('Maximum overlap with other corpus (%)')
-        savefig(fig, 'overlap_score')
+        savefig(fig, 'overlap_score' k=error)
