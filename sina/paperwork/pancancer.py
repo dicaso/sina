@@ -355,7 +355,7 @@ if __name__ == '__main__':
         # Process one task and exit
         sarraytaskid = int(os.environ.get('SLURM_ARRAY_TASK_ID'))
         ct = list(cancertypes)[sarraytaskid]
-        logging.info('Processing array task %s (%s)', sarrayjobid, ct)
+        logging.info('Processing array task %s (%s)', sarraytaskid, ct)
         cancertype, corpus = corpus_workflow(
             corpus=(ct, corpora[ct]), settings=settings,
             ext_embeddings=[allcancers.embedding, glovemdl]
