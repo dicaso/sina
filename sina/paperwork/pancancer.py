@@ -224,6 +224,7 @@ if __name__ == '__main__':
         corpora_sizes.to_csv(os.path.join(saveloc, 'corpora_sizes.csv'))
         logmemory()
     else:
+        # include also corpora_shelve as some code uses that to get a clean original copy
         corpora = corpora_shelve = shelve.open(os.path.join(saveloc, 'corpora.shlv'), flag='r')
         corpora_sizes = pd.read_csv(
             os.path.join(saveloc, 'corpora_sizes.csv'),
@@ -322,7 +323,7 @@ if __name__ == '__main__':
         sarrayjobid = local['sbatch'](
             '--nodes', 1,
             '--cpus-per-task', 4,  # proc/node #TODO change to settings.parallel
-            '--mem', '16G',
+            '--mem', '32G',
             '--time', '60:00:00',
             '--array=0-{}'.format(len(cancertypes) - 1),
             '--wrap',
@@ -340,7 +341,7 @@ if __name__ == '__main__':
             # slurm resources
             '--nodes', 1,
             '--cpus-per-task', 1,  # proc/node
-            '--mem', '8G',
+            '--mem', '16G',
             '--time', '24:00:00',
             '--wrap',
             ' '.join(
