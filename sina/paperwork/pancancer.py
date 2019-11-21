@@ -548,3 +548,71 @@ if __name__ == '__main__':
         ax.set_ylabel('NN score')
         ax.set_xlabel('Maximum overlap with other corpus (%)')
         savefig(fig, 'overlap_score')
+
+        if settings.downsample_evolution:
+            import pandas as pd
+            import glob
+            import re
+            # corpora_sizes = pd.read_csv(os.path.join(saveloc,'corpora_sizes.csv'), index_col=0)
+            file2cancername = {c.replace(' ', ''): c for c in corpora_sizes.index}
+            grid_results_files = glob.glob(
+                os.path.join(saveloc, '*/*.csv')
+            )
+            grid_results_files = {
+                f: pd.read_csv(f, index_col='rank_test_score')
+                for f in grid_results_files
+            }
+            sizere = re.compile(r'_(\d+)_grid')
+            grid_results = pd.DataFrame(
+                {
+                    'filename': sorted(grid_results_files),
+                    'size': [
+                        sizere.search(f).groups()[0] if sizere.search(f)
+                        else None for f in sorted(grid_results_files)]
+                }
+            )
+            grid_results['cancer'] = grid_results.filename.apply(
+                lambda x: os.path.basename(os.path.dirname(x))
+            )
+            grid_results['embedding'] = grid_results.filename.apply(
+                lambda x: grid_results_files[x].loc[1].param_embedding
+            )
+            grid_results['emb_vocab_size'] = grid_results.filename.apply(
+                lambda x: grid_results_files[x].loc[1].vocab_size
+            )
+            grid_results['mean_test_score'] = grid_results.filename.apply(
+                lambda x: grid_results_files[x].loc[1].mean_test_score
+            )
+            grid_results['size'] = grid_results.T.apply(
+                lambda x: x['size'] if x['size'] else
+                corpora_sizes.loc[file2cancername[x.cancer]].trainlen
+            ).astype(int)
+            fig, ax = plt.subplots()
+            # first plot dashed lines showing cancer evolution
+            for cname, cgresults in grid_results.groupby('cancer'):
+                cgresults = cgresults.sort_values('size')
+                ax.plot(cgresults['size'], cgresults.mean_test_score, 'k--')
+                annotpos = tuple(
+                    cgresults.loc[cgresults.last_valid_index()][['size', 'mean_test_score']]
+                )
+                ax.annotate(
+                    cname, annotpos,
+                    xytext=(
+                        annotpos[0] + (-10 if annotpos[0] > 10000 else 10),
+                        annotpos[1]
+                    ),
+                    horizontalalignment='right' if annotpos[0] > 10000 else 'left'
+                )
+            # second plot dots for embedding types
+            for grpname, grpresults in grid_results.groupby('embedding'):
+                ax.scatter(
+                    grpresults['size'],
+                    grpresults.mean_test_score,
+                    label=('custom', 'all-cancers', 'glove')[grpname],
+                    marker=('o', 'v', 's')[grpname]
+                )
+            ax.legend()
+            ax.set_xlabel('Corpus size (#)')
+            ax.set_ylabel('Mesh term prediction accuracy (0-1)')
+            ax.set_title('Predicting mesh terms in downsampled cancer corpora')
+            savefig(fig, 'grid_embeddings')
