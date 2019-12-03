@@ -21,6 +21,7 @@ import gensim
 from collections import OrderedDict
 import sina.config
 from sina.documents import PubmedCollection, PubmedQueryResult
+from sina.utils import logmemory
 import matplotlib
 if __name__ == '__main__':  # in interactive case
     matplotlib.rcParams['figure.max_open_warning'] = 50
@@ -59,14 +60,6 @@ def corpus_workflow(corpus, settings, ext_embeddings):
             'Corpus size too small for consistent predictions (%s)',
             len(corpus.results)
         )
-
-
-def logmemory():
-    import resource
-    logging.info(
-        'Using max {:.0f}MB'.format(resource.getrusage(
-            resource.RUSAGE_SELF).ru_maxrss / 1024)
-    )
 
 
 if __name__ == '__main__':
