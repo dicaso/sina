@@ -1159,33 +1159,44 @@ class PubmedQueryResult(object):
         # if self.testset:
         #    self.results_test.processed = [' '.join([t for t in doc if t in w2model.wv.vocab]) for doc in self.results_test.processed]
 
-        # visualize
+        self.embedding = w2model
+
+        # Get 100 most frequent words
+        top100words = w2model.wv.index2entity[:100]
+        fig = self.vizualize_embedding(top100words, vecsize=vecsize)
+
+        if self.saveloc:
+            fig.savefig(os.path.join(self.saveloc, 'embedding.pdf'))
+
+        return w2model
+
+    def vizualize_embedding(self, words, vecsize, embedding=None):
         import matplotlib.pyplot as plt
         from sklearn.decomposition import PCA
         from sklearn.manifold import TSNE
-        # Get 100 most frequent words
-        top100words = w2model.wv.index2entity[:100]
-        top100vectors = w2model.wv[top100words]
+
+        if not embedding:
+            embedding = self.embedding
+
+        # Retreive word vectors
+        word_vectors = embedding.wv[words]
 
         # Reduce with PCA dimensionality as tSNE does not scale well
-        top100vectors_reduc = PCA(n_components=50).fit_transform(top100vectors) if vecsize > 50 else top100vectors
-        Y = TSNE(n_components=2, random_state=0, perplexity=15).fit_transform(top100vectors_reduc)
+        word_vectors_reduc = PCA(n_components=50).fit_transform(word_vectors) if vecsize > 50 else word_vectors
+        Y = TSNE(n_components=2, random_state=0, perplexity=15).fit_transform(word_vectors_reduc)
 
         # Plot
         fig, ax = plt.subplots()
         ax.scatter(Y[:, 0], Y[:, 1])
-        for word, vec in zip(top100words, Y):
+        for word, vec in zip(words, Y):
             ax.text(vec[0], vec[1],
                     word.title(),
                     horizontalalignment='left',
                     verticalalignment='bottom',
                     size='medium',
                     ).set_size(15)
-        if self.saveloc:
-            fig.savefig(os.path.join(self.saveloc, 'embedding.pdf'))
 
-        self.embedding = w2model
-        return w2model
+        return fig
 
     def k_means_embedding(self, k=100, calc_idcf=True, verbose=False):
         """Calculate k means centroids

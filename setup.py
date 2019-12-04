@@ -11,7 +11,7 @@ setup(name='sina',
       python_requires='>3.6',
       install_requires=[
           'appdirs',  # cache/data dirs for app
-          'dill',    # improved pickle
+          'dill',     # improved pickle
           'plumbum',  # subcommands
           'kindi',
           'requests',
