@@ -1163,26 +1163,29 @@ class PubmedQueryResult(object):
 
         # Get 100 most frequent words
         top100words = w2model.wv.index2entity[:100]
-        fig = self.vizualize_embedding(top100words, vecsize=vecsize)
+        fig = self.vizualize_embedding(top100words)
 
         if self.saveloc:
             fig.savefig(os.path.join(self.saveloc, 'embedding.pdf'))
 
         return w2model
 
-    def vizualize_embedding(self, words, vecsize, embedding=None):
+    def vizualize_embedding(self, words, embedding=None):
         import matplotlib.pyplot as plt
         from sklearn.decomposition import PCA
         from sklearn.manifold import TSNE
 
         if not embedding:
             embedding = self.embedding
+        vecsize = embedding.wv.vector_size
 
         # Retreive word vectors
         word_vectors = embedding.wv[words]
 
         # Reduce with PCA dimensionality as tSNE does not scale well
-        word_vectors_reduc = PCA(n_components=50).fit_transform(word_vectors) if vecsize > 50 else word_vectors
+        word_vectors_reduc = PCA(
+            n_components=len(words) if len(words) < 50 else 50
+        ).fit_transform(word_vectors) if vecsize > 50 else word_vectors
         Y = TSNE(n_components=2, random_state=0, perplexity=15).fit_transform(word_vectors_reduc)
 
         # Plot
