@@ -1,7 +1,7 @@
 """Utility classes or functions
 for sina package
 """
-# import typing
+import typing
 
 
 def logmemory():
@@ -30,18 +30,21 @@ class SettingsBase(object):
       parse (bool): if True, already parse arguments
     """
 
-    def __init__(self, settings=[], groups=False, parse=True):
+    def __init__(self, groups=False, parse=True):
         self.groups = groups
-        if settings:
-            self._settings = settings
-        else:
-            self.setup()
+        self.setup()
         self.make_parser()
         if parse:
             self.parse_args()
 
     def __getitem__(self, key):
         return self.settings.__getattribute__(key)
+
+    def __getattr__(self, name):
+        if name in self.__dict__:
+            return self.__dict__[name]
+        else:
+            return self.settings.__getattribute__(name)
 
     def setup(self):
         """Can be overwritten by inheriting classes.
@@ -56,17 +59,32 @@ class SettingsBase(object):
         ... settings = Settings()
         """
         import inspect
-        sig = inspect.signature(self.setup)
-        # source = inspect.getsource(self.setup)  # to extract help comments
-        # print(sig)
-        self._settings = [
-            (f'--{p}', {
-                'default': sig.parameters[p].default,
-                'type': sig.parameters[p].annotation
-            }
-            )
-            for p in sig.parameters
-        ]
+        cls = type(self)
+        # getting hints from self does not always work
+        annotations = typing.get_type_hints(cls)
+        if annotations:
+            # get_attr does not work so requesting vars
+            cls_vars = vars(cls)
+            self._settings = [
+                (f'--{p}', {
+                    'default': cls_vars[p],  # does not yet work for positionals
+                    'type': annotations[p]
+                }
+                )
+                for p in annotations
+            ]
+        else:
+            sig = inspect.signature(self.setup)
+            # source = inspect.getsource(self.setup)  # to extract help comments
+            # print(sig)
+            self._settings = [
+                (f'--{p}', {
+                    'default': sig.parameters[p].default,
+                    'type': sig.parameters[p].annotation
+                }
+                )
+                for p in sig.parameters
+            ]
 
     def make_parser(self, **kwargs):
         import argparse

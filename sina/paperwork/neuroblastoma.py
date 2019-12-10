@@ -6,6 +6,14 @@
 
 def main():
     from sina.documents import PubmedCollection, PubmedQueryResult
+    from sina.utils import SettingsBase
+    # Settings
+
+    class Settings(SettingsBase):
+        cancercorpus: bool = False  # Include cancer corpus analysis and comparison
+
+    settings = Settings()
+
     # from sina.ranking.ligsea import Ligsea
     import matplotlib.pyplot as plt
     plt.ion()
@@ -25,10 +33,11 @@ def main():
     print(mycn_grams)
     nbresults.vizualize_embedding(list(set(mycn_grams) | mycn_gram_simils))
     # Bigger embedding for comparison and to do projection of low frequency terms
-    cancercorpus = pmc.query_document_index('cancer')
-    cancerresults = PubmedQueryResult(results=cancercorpus, corpus=pmc)
-    cancerresults.transform_text(preprocess=True, method='tfid')
-    cancerresults.gensim_w2v(vecsize=100)
+    if settings.cancercorpus:
+        cancercorpus = pmc.query_document_index('cancer')
+        cancerresults = PubmedQueryResult(results=cancercorpus, corpus=pmc)
+        cancerresults.transform_text(preprocess=True, method='tfid')
+        cancerresults.gensim_w2v(vecsize=100)
     # nbresults.k_means_embedding(k=100)
     nbresults.analyze_mesh(topfreqs=10, getmeshnames=True)
     nbresults.predict_meshterms(model='svm', kmeans_only_freqs=False, rebalance='oversample')
