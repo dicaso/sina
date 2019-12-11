@@ -6,10 +6,10 @@
 
 def main():
     from sina.documents import PubmedCollection, PubmedQueryResult
-    from sina.utils import SettingsBase
+    from argetype import ConfigBase
     # Settings
 
-    class Settings(SettingsBase):
+    class Settings(ConfigBase):
         cancercorpus: bool = False  # Include cancer corpus analysis and comparison
 
     settings = Settings()
@@ -54,6 +54,8 @@ def main():
     # lg.calculate_enrichment()
     # lg.retrieve_datasets()
 
+    return nbresults, mycn_grams, mycn_gram_simils
+
 
 if __name__ == '__main__':
-    main()
+    nbresults, mycn_grams, mycn_gram_simils = main()

@@ -8,8 +8,9 @@ setup(name='sina',
       author_email='christophe.vanneste@kaust.edu.sa',
       license='MIT',
       packages=find_packages(),
-      python_requires='>3.6',
+      python_requires='>=3.7',
       install_requires=[
+          'argetype',  # for settings CLI
           'appdirs',  # cache/data dirs for app
           'dill',     # improved pickle
           'plumbum',  # subcommands
