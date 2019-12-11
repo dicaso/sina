@@ -7,10 +7,15 @@
 def main():
     from sina.documents import PubmedCollection, PubmedQueryResult
     from argetype import ConfigBase
+    # Exposing variables that are created in the script for debugging
+    # and further development
+    global settings, nbresults, mycn_grams, mycn_gram_simils
+
     # Settings
 
     class Settings(ConfigBase):
         cancercorpus: bool = False  # Include cancer corpus analysis and comparison
+        debug: bool = False
 
     settings = Settings()
 
@@ -58,4 +63,4 @@ def main():
 
 
 if __name__ == '__main__':
-    nbresults, mycn_grams, mycn_gram_simils = main()
+    main()

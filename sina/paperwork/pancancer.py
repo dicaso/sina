@@ -7,7 +7,6 @@
 # matplotlib import that needs to run before all else
 import shelve
 import shutil
-import argparse
 import zipfile
 import time
 import os
@@ -63,27 +62,25 @@ def corpus_workflow(corpus, settings, ext_embeddings):
 
 
 if __name__ == '__main__':
-    # Argparse
-    parser = argparse.ArgumentParser()
-    # general settings
-    general = parser.add_argument_group('general settings')
-    general.add_argument('--test', nargs='?', const=True)
-    general.add_argument('--clearcache', nargs='?', const=True)
-    general.add_argument('--debug', nargs='?', const=True, default=False)
-    general.add_argument('--interactive', nargs='?', const=True, default=False)
-    # if ==-1 use one CPU/cancertype
-    general.add_argument('--parallel', type=int)
-    # options multiprocessing, slurm (there are other options but not intended to be started by a user)
-    general.add_argument('--parallel-mode', default='multiprocessing')
-    # ML/NN settings
-    algos = parser.add_argument_group('algorithm settings')
-    algos.add_argument('--w2vecsize', default=100, type=int)
-    algos.add_argument('--k_clusters', default=100, type=int)
-    algos.add_argument('--topmesh', default=10, type=int)
-    algos.add_argument('--downsample-evolution', nargs='?',
-                       const=True, default=False)
-    algos.add_argument('--outputdir')
-    settings = parser.parse_args()
+    from argetype import ConfigBase
+
+    class Settings(ConfigBase):
+        class General:
+            test: bool = False
+            clearcache: bool = False
+            debug: bool = False
+            interactive: bool = False
+            parallel: int = None  # if ==-1 use one CPU/cancertype
+            parallel_mode: str = 'multiprocessing'  # options multiprocessing, slurm (there are other options but not intended to be started by a user)
+
+        # ML/NN settings
+        class Algorithm:
+            w2vecsize: int = 100
+            k_clusters: int = 100
+            topmesh: int = 10
+            downsample_evolution: bool = False
+            outputdir: str = None
+    settings = Settings()
 
     # Set mainprocess to True if not a child process
     mainprocess = not os.environ.get('SLURM_ARRAY_TASK_ID')
@@ -119,10 +116,10 @@ if __name__ == '__main__':
 
     # algorithm settings to pass to distributed jobs
     algorithm_settings = list(it.chain(*[
-        (a.option_strings[0],) if a.nargs == '?' else
-        (a.option_strings[0], str(settings.__getattribute__(a.dest)))
-        for a in algos._group_actions
-        if not a.const or (a.const == settings.__getattribute__(a.dest))
+        (a.option_strings[0],) if a.nargs == 0 else
+        (a.option_strings[0], str(settings[a.dest]))
+        for a in settings.group_parsers['Algorithm']._group_actions
+        if not a.const or (a.const == settings[a.dest])
     ]))
 
     # Logging
