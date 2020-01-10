@@ -32,7 +32,8 @@ setup(name='sina',
           'GEOparse'  # GEOquery inspired python package
       ],
       extras_require={
-          'documentation': ['Sphinx']
+          'documentation': ['Sphinx'],
+          'nbpaper': ['node2vec', 'networkx'],
       },
       package_data={
           'sina': [
