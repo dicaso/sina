@@ -27,6 +27,7 @@ def main():
         vecsize: int = 100  # size of the embedding vectors
         adjpval: bool = True  # adjust P values with R function
         tm_exp_corr: bool = True  # If yes, do not predict topics and use all abstracts
+        interactive: bool = False  # Interactive for matplotlib
 
     settings = Settings()
     if settings.adjpval:
@@ -37,7 +38,13 @@ def main():
 
     # from sina.ranking.ligsea import Ligsea
     import matplotlib.pyplot as plt
-    plt.ion()
+    if settings.interactive:
+        plt.ion()
+    else:
+        import matplotlib
+        matplotlib.use('pdf')
+
+    # retrieve documents
     pmc = PubmedCollection()
     nbcorpus = pmc.query_document_index('neuroblastoma')
     nbresults = PubmedQueryResult(
