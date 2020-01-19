@@ -4,6 +4,59 @@
 # python3 -m sina.paperwork.neuroblastoma
 
 
+def analyze_tm_exp_corr(genesymbols, textmodel, expmodel, adjpval=True, stats=None, verbose=True):
+    """Analyze correlations for gene symbols between
+    text mining associations and experimental associations
+
+    Args:
+        genesymbols (list): the list of genesymbols to analyze
+        textmodel (embedding): model based on text mining
+        expmodel (embedding): network model based on experimental data
+        adjpval (bool): If True, calculate false discovery rates
+        stats (R module): R module for calculating adjusted P-values
+        verbose (bool): If True, print results
+    """
+    import pandas as pd
+    from scipy.stats import spearmanr
+
+    genecorrelations = {}
+    for gene in genesymbols:
+        if gene not in expmodel.wv.vocab or gene.lower() not in textmodel.wv.vocab:
+            continue
+        genecorr = pd.DataFrame(
+            expmodel.wv.similar_by_word(
+                gene,
+                len(expmodel.wv.vocab)
+            )
+        ).set_index(0)
+        genelit = pd.DataFrame(
+            textmodel.wv.similar_by_word(
+                gene.lower(),
+                len(textmodel.wv.vocab)
+            )
+        ).set_index(0)
+        genelit.index = genelit.index.str.upper()
+        genelit = genelit[genelit.index.isin(genecorr.index)].sort_index()
+        genecorr = genecorr[genecorr.index.isin(genelit.index)].sort_index()
+        genecorrelations[gene] = spearmanr(genelit, genecorr)
+        if verbose:
+            print(gene, genecorrelations[gene])
+    genecorrelations = pd.DataFrame(genecorrelations).T
+    genecorrelations.columns = ['correlation', 'pvalue']
+    if verbose:
+        print(
+            genecorrelations.sort_values('pvalue').head(10),
+            genecorrelations.sort_values('pvalue').tail(10)
+        )
+    topgc = genecorrelations[genecorrelations.pvalue < .05].sort_values('pvalue')
+    if adjpval:
+        genecorrelations.sort_values('pvalue', inplace=True)
+        genecorrelations['padj'] = stats.p_adjust(genecorrelations.pvalue, method='fdr')
+        # method options = "holm", "hochberg", "hommel", "bonferroni", "BH", "BY", "fdr"
+
+    return genecorrelations, topgc
+
+
 def main():
     from sina.documents import PubmedCollection, PubmedQueryResult
     from argetype import ConfigBase
@@ -11,12 +64,11 @@ def main():
     from bidali.LSD.dealer.celllines import get_NB39
     import networkx as nx
     from node2vec import Node2Vec
-    import pandas as pd
-    from scipy.stats import spearmanr
 
     # Exposing variables that are created in the script for debugging
     # and further development
-    global settings, nbresults, mycn_grams, mycn_gram_simils, genecorrelations, model, topgc
+    global settings, nbresults, mycn_grams, mycn_gram_simils, genecorrelations, expmodel, topgc
+    global cancerresults, cr_genecorrelations, cr_topgc
 
     # Settings
 
@@ -86,41 +138,13 @@ def main():
         node2vec = Node2Vec(
             G, dimensions=settings.vecsize, walk_length=30, num_walks=200, workers=4
         )
-        model = node2vec.fit(window=10, min_count=1, batch_words=4)
+        expmodel = node2vec.fit(window=10, min_count=1, batch_words=4)
 
         # Investigating embedding correlations
-        genecorrelations = {}
-        for gene in genesymbols:
-            if gene not in model.wv.vocab or gene.lower() not in nbresults.embedding.wv.vocab:
-                continue
-            genecorr = pd.DataFrame(
-                model.wv.similar_by_word(
-                    gene,
-                    len(model.wv.vocab)
-                )
-            ).set_index(0)
-            genelit = pd.DataFrame(
-                nbresults.embedding.wv.similar_by_word(
-                    gene.lower(),
-                    len(nbresults.embedding.wv.vocab)
-                )
-            ).set_index(0)
-            genelit.index = genelit.index.str.upper()
-            genelit = genelit[genelit.index.isin(genecorr.index)].sort_index()
-            genecorr = genecorr[genecorr.index.isin(genelit.index)].sort_index()
-            genecorrelations[gene] = spearmanr(genelit, genecorr)
-            print(gene, genecorrelations[gene])
-        genecorrelations = pd.DataFrame(genecorrelations).T
-        genecorrelations.columns = ['correlation', 'pvalue']
-        print(
-            genecorrelations.sort_values('pvalue').head(10),
-            genecorrelations.sort_values('pvalue').tail(10)
+        genecorrelations, topgc = analyze_tm_exp_corr(
+            genesymbols, nbresults.embedding, expmodel,
+            adjpval=settings.adjpval, stats=stats
         )
-        topgc = genecorrelations[genecorrelations.pvalue < .05].sort_values('pvalue')
-        if settings.adjpval:
-            genecorrelations.sort_values('pvalue', inplace=True)
-            genecorrelations['padj'] = stats.p_adjust(genecorrelations.pvalue, method='fdr')
-            # method options = "holm", "hochberg", "hommel", "bonferroni", "BH", "BY", "fdr"
 
     # Bigger embedding for comparison and to do projection of low frequency terms
     if settings.cancercorpus:
@@ -131,6 +155,12 @@ def main():
         )
         cancerresults.transform_text(preprocess=True, method='tfid')
         cancerresults.gensim_w2v(vecsize=100)
+
+        if settings.tm_exp_corr:
+            cr_genecorrelations, cr_topgc = analyze_tm_exp_corr(
+                genesymbols, cancerresults.embedding, expmodel,
+                adjpval=settings.adjpval, stats=stats
+            )
 
     if not settings.tm_exp_corr:
         # nbresults.k_means_embedding(k=100)
@@ -149,7 +179,7 @@ def main():
         # lg.calculate_enrichment()
         # lg.retrieve_datasets()
 
-        # no return statement -> returning through declaring globals
+    # no return statement -> returning through declaring globals
 
 
 if __name__ == '__main__':
