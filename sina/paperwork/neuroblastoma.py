@@ -57,6 +57,36 @@ def analyze_tm_exp_corr(genesymbols, textmodel, expmodel, adjpval=True, stats=No
     return genecorrelations, topgc
 
 
+def vec_relation_fig(refvec, plusvec, minvec, model, extrapoints=tuple(), figsize=(12, 8)):
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    vecdata = pd.DataFrame(
+        {k: model[k] for k in (refvec, minvec, plusvec)+tuple(extrapoints)}
+    )
+    vec_var = vecdata.T.var()
+    points = vecdata[(vec_var >= vec_var.quantile(1-2/len(vec_var)))].reset_index(drop=True)
+    points['sumvec'] = points[refvec] - points[minvec] + points[plusvec]
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.scatter(points.loc[0], points.loc[1])
+    for c in points:
+        ax.annotate(c, points[c], xytext=(5, 5), textcoords='offset pixels', fontsize=20)
+    ax.annotate(
+        "", xy=points[plusvec], xytext=points[minvec],
+        arrowprops=dict(arrowstyle='->', color='r')
+    )
+    ax.annotate(
+        "", xy=points['sumvec'], xytext=points[refvec],
+        arrowprops=dict(arrowstyle='->', color='r')
+    )
+    print(
+        refvec, pd.DataFrame(model.similar_by_word(refvec)),
+        pd.DataFrame(
+            model.similar_by_vector(model[refvec] - model[minvec] + model[plusvec])
+        ), sep='\n'
+    )
+    return ax, points
+
+
 def main():
     from sina.documents import PubmedCollection, PubmedQueryResult
     from argetype import ConfigBase
@@ -159,6 +189,7 @@ def main():
         if settings.tm_exp_corr:
             cr_genecorrelations, cr_topgc = analyze_tm_exp_corr(
                 genesymbols, cancerresults.embedding, expmodel,
+                # TODO genesymbols are those that were also in NB lit
                 adjpval=settings.adjpval, stats=stats
             )
 
